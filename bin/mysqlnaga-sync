@@ -18,6 +18,7 @@ use Pod::Usage;
 my $OPTIONS = _parse_options();
 
 my $DB        = $OPTIONS->{database};
+my $TARGET_DB = $OPTIONS->{targetdatabase};
 my $VERBOSE   = $OPTIONS->{verbose};
 my $NO_DUMP   = $OPTIONS->{'no-dump'};
 my $NO_VIEWS  = $OPTIONS->{'no-views'};
@@ -29,11 +30,19 @@ my $SOURCE_TABLES = _schema_information($SOURCE_DBH);
 
 my $EXIT_CODE = 0;
 
+
+
+## Go time...
 process_db();
 exit $EXIT_CODE;
 
+
+
+## Subroutines
+
 sub process_db {
-  verbose("Working on database '${DB}'");
+  verbose("Working from database '${DB}'");
+  verbose("Working to target database '${TARGET_DB}'");
   
   if(! _has_database($TARGET_DBH)) {
     verbose('DB does not exist on the target server; creating');
@@ -254,24 +263,21 @@ sub _perform_count {
 
 sub _parse_options {
   my @options = qw(
-    checksum
-    count
-    date
-    directory=s
-    database=s
+    host=s targethost=s
+    port=i targetport=s
+    user=s targetuser=s
+    password=s targetpassword=s
+    database=s targetdatabase=s 
+    dump-directory=s
+
+    checksum count date
+
+    verbose
     disable-foreign-keys
-    host=s
     no-dump
     no-views
-    password=s
-    port=i
-    targethost=s
-    targetpassword=s
-    targetport=s
-    targetuser=s
-    user=s
     use-naga
-    verbose
+
     version
     help|?
     man
@@ -279,14 +285,20 @@ sub _parse_options {
 
   my $opts = {};
 
-  GetOptions( $opts, @options ) or pod2usage(2);
+  # Populates $opts
+  GetOptions( $opts, @options )
+      or pod2usage(2);
+
   pod2usage(1) if $opts->{help};
   pod2usage( -exitstatus => 0, -verbose => 2 ) if $opts->{man};
+
   if ( $opts->{version} ) {
     print "mysqlnaga-sync version $VERSION\n";
     exit(0);
   }
+  
   _confirm_options($opts);
+  
   return $opts;
 }
 
@@ -294,20 +306,15 @@ sub _confirm_options {
   my ($opts) = @_;
 
   if ( !$opts->{database} ) {
-    print STDERR "Need a schema to work with\n";
+    print STDERR "Need a schema to work with (--database)\n";
     pod2usage(1);
   }
-  
-  _optional_set( $opts, 'directory', '.' );
-  
+
+  $opts->{directory} ||= '.';
+  $opts->{targetdatabase} ||= $opts->{database};
+
   $opts->{directory} = File::Spec->rel2abs($opts->{directory});
 
-  return;
-}
-
-sub _optional_set {
-  my ( $opts, $key, $default ) = @_;
-  $opts->{$key} = $default unless $opts->{$key};
   return;
 }
 
@@ -671,9 +678,10 @@ Use the last modified date/created date to calculate if a table has changed
 
 =item B<--directory>
 
-The directory to dump text files to. If not specified the program will use
-the cwd. A directory will be created in this one by the same name of the
-database being transferred with all files being dumped into here.
+The base directory to dump text files to. If not specified the program
+will use the cwd. A directory will be created in the base directory
+with same name as the database being transferred with all files being
+dumped into here.
 
 =item B<--use-naga>
 
