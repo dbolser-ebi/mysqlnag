@@ -3,6 +3,8 @@
 use strict;
 use warnings;
 
+require('subs.pm');
+
 our $VERSION = '1.0';
 
 use Getopt::Long;
@@ -53,13 +55,6 @@ sub process_db {
   }
   _dump_sql();
   verbose("Finished with database '${DB}'");
-  return;
-}
-
-sub verbose {
-  if ($VERBOSE) {
-    print STDERR @_, "\n";
-  }
   return;
 }
 
@@ -137,39 +132,20 @@ sub _parse_options {
 
 sub _confirm_options {
   my ($opts) = @_;
-
-#TODO Need to add more options here to ensure it works properly ...  think it does
-
+  
+  ## TODO Need to add more options here to ensure it works properly ...  think it does
+  
   if ( !$opts->{database} ) {
     print STDERR "Need a schema to dump\n";
     pod2usage(1);
   }
-
-  _optional_set( $opts, 'fields-terminated-by',          "\t" );
-  _optional_set( $opts, 'fields-optionally-enclosed-by', '' );
-  _optional_set( $opts, 'lines-terminated-by',           "\n" );
-  _optional_set( $opts, 'directory',                     '.' );
-
+  
+  $opts->{'fields-terminated-by'}          ||= "\t";
+  $opts->{'fields-optionally-enclosed-by'} ||= '';
+  $opts->{'lines-terminated-by'}           ||= "\n";
+  $opts->{directory}                       ||= '.';
+  
   return;
-}
-
-sub _optional_set {
-  my ( $opts, $key, $default ) = @_;
-  $opts->{$key} = $default unless $opts->{$key};
-  return;
-}
-
-sub _open_dbh {
-  my ( $hostname, $blocking_select, $port, $user, $password ) = (
-    ( $OPTIONS->{host} )            ? ";host=$OPTIONS->{host}" : '',
-    ( $OPTIONS->{port} )            ? ";port=$OPTIONS->{port}" : '',
-    ( $OPTIONS->{blocking_select} ) ? ";mysql_use_result=1"    : '',
-    ( $OPTIONS->{user} )            ? $OPTIONS->{user}         : undef,
-    ( $OPTIONS->{password} )        ? $OPTIONS->{password}     : undef
-  );
-  my $dsn = "DBI:mysql:database=${DB}${hostname}${port}${blocking_select}";
-  my $dbh = DBI->connect( $dsn, $user, $password, { RaiseError => 1 } );
-  return $dbh;
 }
 
 sub _tables {
