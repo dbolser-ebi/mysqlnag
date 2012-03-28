@@ -3,6 +3,8 @@
 use strict;
 use warnings;
 
+require('subs.pm');
+
 our $VERSION = '1.0';
 
 use Carp;
@@ -40,13 +42,6 @@ sub process_db {
 	}
 	_drop_source();
 	verbose("Finished with database '${DB}'");
-	return;
-}
-
-sub verbose {
-	if($VERBOSE) {
-		print STDERR @_, "\n";	
-	}
 	return;
 }
 
@@ -116,18 +111,6 @@ sub _confirm_options {
 	}
 	
 	return;	
-}
-
-sub _open_dbh {
-	my ($hostname, $port, $user, $password) = (
-		($OPTIONS{host})     ? ";host=$OPTIONS{host}" : '',
-		($OPTIONS{port})     ? ";port=$OPTIONS{port}" : '',
-		($OPTIONS{user})     ? $OPTIONS{user} : undef,
-		($OPTIONS{password}) ? $OPTIONS{password} : undef
-	);
-	my $dsn = "DBI:mysql:database=${DB}${hostname}${port}";
-	my $dbh = DBI->connect($dsn, $user, $password, {RaiseError => 1});
-	return $dbh;
 }
 
 sub _assert_target {

@@ -3,6 +3,8 @@
 use strict;
 use warnings;
 
+require('subs.pm');
+
 our $VERSION = '1.0';
 
 use Cwd;
@@ -95,13 +97,6 @@ sub process_db {
   
   verbose("Finished with database '${DB}'");
   
-  return;
-}
-
-sub verbose {
-  if ($VERBOSE) {
-    print STDERR @_, "\n";
-  }
   return;
 }
 
@@ -318,58 +313,40 @@ sub _confirm_options {
   return;
 }
 
-sub _open_dbh {
-	my ($type) = @_;
-
-	my $details = {
-		source => [
-			$OPTIONS->{host}, 
-			$OPTIONS->{port}, 
-			$OPTIONS->{user}, 
-			$OPTIONS->{password},
-			'information_schema'
-		],
-		target => [
-			$OPTIONS->{targethost} || $OPTIONS->{host}, 
-			$OPTIONS->{targetport} || $OPTIONS->{port}, 
-			$OPTIONS->{targetuser} || $OPTIONS->{user}, 
-			$OPTIONS->{targetpassword} || $OPTIONS->{password},
-		  'information_schema'	
-		]
-	}->{$type};
-	
-	my ($hostname, $port, $user, $password, $db) = (
-		($details->[0])     ? ";host=$details->[0]" : '',
-		($details->[1])     ? ";port=$details->[1]" : '',
-		($details->[2])     ? $details->[2]         : undef,
-		($details->[3])     ? $details->[3]         : undef,
-		$details->[4]
-	);
-	my $dsn = "DBI:mysql:database=${db}${hostname}${port}";
-	my $dbh = DBI->connect($dsn, $user, $password, {RaiseError => 1});
-	return $dbh;
-}
-
 sub _schema_information {
   my ($dbh) = @_;
   my $schema_hash = {};
+
   my $sql = <<'SQL';
-select TABLE_NAME, CREATE_TIME, UPDATE_TIME, TABLE_ROWS, ENGINE, TABLE_TYPE
-from information_schema.TABLES 
-where TABLE_SCHEMA =?
+SELECT
+  TABLE_NAME,
+  CREATE_TIME,
+  UPDATE_TIME,
+  TABLE_ROWS,
+  ENGINE,
+  TABLE_TYPE
+FROM
+  information_schema.TABLES 
+WHERE
+  TABLE_SCHEMA =?
 SQL
+
   my $sth = $dbh->prepare($sql);
   $sth->execute($OPTIONS->{database});
+
   while(my $row = $sth->fetchrow_arrayref()) {
     my ($table, $created, $modified, $count, $engine, $type) = @{$row};
-    my $date = (defined $modified) ? $modified : $created;
+
     $schema_hash->{$table} = {
       count => $count,
-      view => (($type eq 'VIEW') ? 1 : 0 )
+      view  => $type eq 'VIEW',
     };
-    $schema_hash->{$table}->{date} = 
-      DateTime::Format::MySQL->parse_datetime($date) if defined $date;
-     
+
+    my $date = $modified || $created;
+    $schema_hash->{$table}->{date} =
+      DateTime::Format::MySQL->parse_datetime($date)
+	  if defined $date;
+
     if(!$schema_hash->{view} && defined $engine && $engine eq 'InnoDB') {
       $schema_hash->{$table}->{count} = _perform_count($table, $dbh, $OPTIONS->{database});
     }

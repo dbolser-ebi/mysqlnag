@@ -3,6 +3,8 @@
 use strict;
 use warnings;
 
+require('subs.pm');
+
 our $VERSION = '1.1';
 
 use Carp;
@@ -73,13 +75,6 @@ sub process_db {
 	}
 	
 	verbose("Finished with database '${DB}'");
-	return;
-}
-
-sub verbose {
-	if($VERBOSE) {
-		print STDERR @_, "\n";	
-	}
 	return;
 }
 
@@ -159,30 +154,12 @@ sub _confirm_options {
 		pod2usage(1);
 	}
 	
-	_optional_set($opts, 'fields-terminated-by', "\t");
-	_optional_set($opts, 'fields-optionally-enclosed-by', q{});
-	_optional_set($opts, 'lines-terminated-by', "\n");
-	_optional_set($opts, 'directory', '.');
-	
+	$opts->{'fields-terminated-by'}          ||= "\t";
+	$opts->{'fields-optionally-enclosed-by'} ||= '';
+	$opts->{'lines-terminated-by'}           ||= "\n";
+	$opts->{directory}                       ||= '.';
+
 	return;	
-}
-
-sub _optional_set {
-	my ($opts, $key, $default) = @_;	
-	$opts->{$key} = $default unless $opts->{$key};
-	return;
-}
-
-sub _open_dbh {
-	my ($hostname, $port, $user, $password) = (
-		($OPTIONS{host})     ? ";host=$OPTIONS{host}" : '',
-		($OPTIONS{port})     ? ";port=$OPTIONS{port}" : '',
-		($OPTIONS{user})     ? $OPTIONS{user} : undef,
-		($OPTIONS{password}) ? $OPTIONS{password} : undef
-	);
-	my $dsn = "DBI:mysql:database=${DB}${hostname}${port};mysql_local_infile=1";
-	my $dbh = DBI->connect($dsn, $user, $password, {RaiseError => 1});
-	return $dbh;
 }
 
 sub _squirt_sql {

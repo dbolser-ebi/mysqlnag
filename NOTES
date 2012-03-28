@@ -1,0 +1,26 @@
+
+Installing...
+
+Starting with a vanilla SL6.2...
+
+I found I needed to install:
+* DateTime
+* DateTime::Format::MySQL
+* DBI (sigh)
+
+To avoid global Perl install headaches, I set up cpanm and local-lib
+using instructions here:
+http://goo.gl/iiYns
+
+local::lib requres CPAN, which I installed using yum.
+
+
+Then issued these commands:
+$ cpanm DateTime
+$ cpanm DateTime::Format::MySQL
+$ cpanm DBI
+
+DBI required gcc, which I installed using yum (sigh).
+
+
+Runs!

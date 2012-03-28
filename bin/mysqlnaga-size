@@ -3,6 +3,8 @@
 use strict;
 use warnings;
 
+require('subs.pm');
+
 our $VERSION = '1.0';
 
 use Carp;
@@ -35,13 +37,6 @@ sub process_db {
 	verbose("Running size calculations for '${DB}'");
 	my $size_hash = size();
 	_print_sizes($db, $size_hash);
-	return;
-}
-
-sub verbose {
-	if($VERBOSE) {
-		print STDERR @_, "\n";	
-	}
 	return;
 }
 
@@ -151,27 +146,6 @@ sub _confirm_options {
 	}
 	
 	return;	
-}
-
-sub _open_dbh {
-	my $details = [
-		$OPTIONS{host}, 
-		$OPTIONS{port}, 
-		$OPTIONS{user}, 
-		$OPTIONS{password}
-  ];
-		
-	my $db = $OPTIONS{database};
-	
-	my ($hostname, $port, $user, $password) = (
-		($details->[0])     ? ";host=$details->[0]" : '',
-		($details->[1])     ? ";port=$details->[1]" : '',
-		($details->[2])     ? $details->[2]         : undef,
-		($details->[3])     ? $details->[3]         : undef
-	);
-	my $dsn = "DBI:mysql:${hostname}${port}";
-	my $dbh = DBI->connect($dsn, $user, $password, {RaiseError => 1});
-	return $dbh;
 }
 
 sub _switch_schema {

@@ -3,6 +3,8 @@
 use strict;
 use warnings;
 
+require('subs.pm');
+
 our $VERSION = '1.0';
 
 use Carp;
@@ -54,13 +56,6 @@ sub compare_schemas {
   }
 }
 
-sub verbose {
-	if($VERBOSE) {
-		print STDERR @_, "\n";	
-	}
-	return;
-}
-
 sub _parse_options {
 	my @options = qw(
 	  create
@@ -108,38 +103,6 @@ sub _confirm_options {
 	}
 	
 	return;	
-}
-
-sub _open_dbh {
-	my ($type) = @_;
-
-	my $details = {
-		source => [
-			$OPTIONS{host}, 
-			$OPTIONS{port}, 
-			$OPTIONS{user}, 
-			$OPTIONS{password}
-		],
-		target => [
-			$OPTIONS{targethost} || $OPTIONS{host}, 
-			$OPTIONS{targetport} || $OPTIONS{port}, 
-			$OPTIONS{targetuser} || $OPTIONS{user}, 
-			$OPTIONS{targetpassword} || $OPTIONS{password}
-		]
-	}->{$type};
-		
-	my $db = { source => $OPTIONS{database}, target => $OPTIONS{target} }->{$type};
-	
-	my ($hostname, $port, $user, $password) = (
-		($details->[0])     ? ";host=$details->[0]" : '',
-		($details->[1])     ? ";port=$details->[1]" : '',
-		($details->[2])     ? $details->[2]         : undef,
-		($details->[3])     ? $details->[3]         : undef
-	);
-	my $dsn = "DBI:mysql:database=${DB}${hostname}${port}";
-	my $dbh = DBI->connect($dsn, $user, $password, {RaiseError => 1});
-	$dbh->do('use '.$db);
-	return $dbh;
 }
 
 sub _db_tables {

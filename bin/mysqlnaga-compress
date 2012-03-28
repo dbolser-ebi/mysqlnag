@@ -3,6 +3,8 @@
 use strict;
 use warnings;
 
+require('subs.pm');
+
 our $VERSION = '1.0';
 
 use Carp;
@@ -36,13 +38,6 @@ sub process_db {
     _process_table($table);
   }
   verbose("Finished with database '${DB}'");
-  return;
-}
-
-sub verbose {
-  if ($VERBOSE) {
-    print STDERR @_, "\n";
-  }
   return;
 }
 
@@ -162,16 +157,12 @@ sub _parse_options {
 }
 
 sub _confirm_options {
-  my ($opts) = @_;
-  _optional_set( $opts, 'directory', '.' );
-  $opts->{database} = basename(File::Spec->rel2abs($opts->{directory}));
-  return;
-}
-
-sub _optional_set {
-  my ( $opts, $key, $default ) = @_;
-  $opts->{$key} = $default unless $opts->{$key};
-  return;
+    my ($opts) = @_;
+    
+    $opts->{directory} ||= '.';
+    $opts->{database} = basename(File::Spec->rel2abs($opts->{directory}));
+    
+    return;
 }
 
 sub _run_mysql {
@@ -332,20 +323,20 @@ The formalisation of MyISAM compression which attempts to:
 
 =back
 
-This compression can only be performed over MyISAM tables and forcing it to
-run over any other type will cause an error to be raised. Because this is using
-admin actions make sure you give the command an admin level of access and
-ensure that B<myisamchk> and B<myisampack> are avaible on your PATH and
-are of a compatible version.
+This compression can only be performed over MyISAM tables and forcing
+it to run over any other type will cause an error to be raised. As
+this is using admin actions, make sure you give the command an admin
+level of access and ensure that B<myisamchk> and B<myisampack> are
+avaible on your PATH and are of a compatible version.
 
-If you believe that the disconnect reconnect pattern is causing a problem
-then look into increasing the persistent thread pool in MySQL which will
-allow for thread reuse limiting the overhead of a reconnect to reusing
-an existing thread.
+If you believe that the disconnect reconnect pattern is causing a
+problem then look into increasing the persistent thread pool in MySQL
+which will allow for thread reuse limiting the overhead of a reconnect
+to reusing an existing thread.
 
 Should you specify the C<--decompress> flag then this will be run in
-reverse however when decompressing we only run the myisamchk command since this
-deals with the decompression algorithm.
+reverse however when decompressing we only run the myisamchk command
+since this deals with the decompression algorithm.
 
 =head1 OPTIONS
 
@@ -353,14 +344,14 @@ deals with the decompression algorithm.
 
 =item B<--directory>
 
-The directory find tables in; if not specified will default to the current 
-working directory.
+The directory find tables in; if not specified will default to the
+current working directory.
 
 =item B<--group>
 
-A string which should be the group these files must belong to. We will also
-ensure that the group and user has read/write access to them. If 
-not specified then we do not perform the chgrp command. 
+A string which should be the group these files must belong to. We will
+also ensure that the group and user has read/write access to them. If
+not specified then we do not perform the chgrp command.
 
 =item B<--decompress>
 
