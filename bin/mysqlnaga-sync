@@ -17,6 +17,25 @@ use File::Spec;
 use Getopt::Long;
 use Pod::Usage;
 
+=pod
+
+=head1 NAME
+
+mysqlnaga-sync
+
+=head1 SYNOPSIS
+
+  mysqlnaga-sync --database DB [--directory DIR] \
+    [--host HOST] [--port PORT] \
+    [--user USER] [--pass PASS] \
+    [--targethost HOST] [--targetport PORT] \
+    [--targetuser USER] [--targetpass PASS] \
+    [more options in -h]
+
+=cut
+
+
+
 my $OPTIONS = _parse_options();
 
 my $DB        = $OPTIONS->{database};
@@ -277,16 +296,16 @@ sub _parse_options {
     help|?
     man
   );
-
+  
   my $opts = {};
-
+  
   # Populates $opts
   GetOptions( $opts, @options )
       or pod2usage(2);
-
+  
   pod2usage(1) if $opts->{help};
   pod2usage( -exitstatus => 0, -verbose => 2 ) if $opts->{man};
-
+  
   if ( $opts->{version} ) {
     print "mysqlnaga-sync version $VERSION\n";
     exit(0);
@@ -299,17 +318,17 @@ sub _parse_options {
 
 sub _confirm_options {
   my ($opts) = @_;
-
+  
   if ( !$opts->{database} ) {
     print STDERR "Need a schema to work with (--database)\n";
     pod2usage(1);
   }
-
+  
   $opts->{directory} ||= '.';
   $opts->{targetdatabase} ||= $opts->{database};
-
+  
   $opts->{directory} = File::Spec->rel2abs($opts->{directory});
-
+  
   return;
 }
 
@@ -592,17 +611,8 @@ sub _toggle_foreign_key {
   return;
 }
 
-__END__
 
 =pod
-
-=head1 NAME
-
-mysqlnaga-sync
-
-=head1 SYNOPSIS
-
-	./mysqlnaga-sync -database DB [-directory DIR] [-host HOST] [-port PORT] [-user USER] [-pass PASS] [more options in -h]
 
 =head1 DESCRIPTION
 
@@ -763,23 +773,32 @@ Andrew Yates
 Copyright (c) 2010, EMBL
 All rights reserved.
 
-Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that thefollowing conditions are met:
 
-* Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
-* Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
-* Neither the name of the EMBL nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+* Redistributions of source code must retain the above copyright
+  notice, this list of conditions and the following disclaimer.
 
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE 
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE 
-ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE 
-LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
-CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF 
-SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS 
-INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN 
-CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
-ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF 
-THE POSSIBILITY OF SUCH DAMAGE.
+* Redistributions in binary form must reproduce the above copyright
+  notice, this list of conditions and the following disclaimer in the
+  documentation and/or other materials provided with the distribution.
+
+* Neither the name of the EMBL nor the names of its contributors may
+  be used to endorse or promote products derived from this software
+  without specific prior written permission.
+
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 =head1 VERSION
 
