@@ -16,6 +16,21 @@ use Pod::Usage;
 use Memoize;
 memoize('_columns');
 
+
+=pod
+
+=head1 NAME
+
+mysqlnaga
+
+=head1 SYNOPSIS
+
+  ./mysqlnaga -database DB [-directory DIR] \
+    [-host HOST] [-port PORT] [-user USER] [-pass PASS] \
+    [more options in -h]
+
+=cut
+
 my $OPTIONS = _parse_options();
 
 my $DB      = $OPTIONS->{database};
@@ -26,6 +41,8 @@ my $VERBOSE = $OPTIONS->{verbose};
 my $LOCK    = $OPTIONS->{lock};
 
 my $DBH    = _open_dbh();
+_switch_db($DBH, $DB); # Sorry!
+
 my @TABLES = _tables();
 
 my %BINARY_COLUMNS = (
@@ -320,17 +337,7 @@ sub _list_tables {
   return @tables;
 }
 
-__END__
-
 =pod
-
-=head1 NAME
-
-mysqlnaga
-
-=head1 SYNOPSIS
-
-	./mysqlnaga -database DB [-directory DIR] [-host HOST] [-port PORT] [-user USER] [-pass PASS] [more options in -h]
 
 =head1 DESCRIPTION
 
@@ -460,3 +467,54 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 1.0
 
 =cut
+
+## Subroutines common to all programs. Although this is a package, we
+## simply 'requier' it for ease of installation. CPAN you say?
+
+sub verbose {
+  if ($VERBOSE) {
+    warn @_, "\n";
+  }
+  return;
+}
+
+## Doesn't DBI provide a helper for this?
+sub _open_dbh {
+    my $type = shift || 'source';
+
+    ## If type is 'target', we use an alternative set of options,
+    ## simply distinguished by a consistent prefix
+    my $option_prefix = $type eq 'target' ? 'target' : '';
+    
+    ## Read the options
+    my $host = $OPTIONS->{$option_prefix. 'host'} || '';
+    my $port = $OPTIONS->{$option_prefix. 'port'} || '';
+    my $user = $OPTIONS->{$option_prefix. 'user'} || undef;
+    my $password = $OPTIONS->{$option_prefix. 'password'} || undef;
+    
+    ## We 'DNS-ify' some of the options:
+    $host = "host=$host" if $host;
+    $port = "port=$port" if $port;
+    
+    ## And handle a couple of others...
+    my $block = $OPTIONS->{blocking_select} ? "mysql_use_result=1" : '';
+    my $extra = "mysql_local_infile=1";
+    
+    ## Build the DSN
+    my $dsn = "DBI:mysql:".
+        join(';', $host, $port, $block, $extra);
+    
+    verbose("DSN:$dsn");
+    
+    return
+      DBI->connect( $dsn, $user, $password, { RaiseError => 1 } );
+}
+
+sub _switch_db {
+  my $dbh = shift;
+  my $db  = shift;
+  
+  my $q_db = $dbh->
+      quote_identifier($db);
+  return $dbh->do('use '. $q_db);
+}
