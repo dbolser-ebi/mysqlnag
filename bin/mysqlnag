@@ -1,0 +1,696 @@
+#!/bin/env perl
+
+use strict;
+use warnings;
+
+our $VERSION = '0.1';
+
+#use Cwd;
+#use DateTime;
+use DateTime::Format::MySQL;
+use DBI;
+#use File::Find;
+use File::Path qw(make_path);
+use File::Spec;
+
+use Getopt::Long;
+use Pod::Usage;
+
+
+=pod
+
+=head1 NAME
+
+mysqlnaga-sync
+
+=head1 SYNOPSIS
+
+  mysqlnaga-sync --database DB [--directory DIR] \
+    [--host HOST] [--port PORT] \
+    [--user USER] [--pass PASS] \
+    [--targethost HOST] [--targetport PORT] \
+    [--targetuser USER] [--targetpass PASS] \
+    [more options in -h]
+
+=cut
+
+
+
+my $OPTIONS = _parse_options();
+
+## These options are used often, so we re-define them here
+my $SOURCE_DB = $OPTIONS->{database};
+my $TARGET_DB = $OPTIONS->{targetdatabase};
+my $VERBOSE   = $OPTIONS->{verbose};
+
+my $SOURCE_DBH = _open_dbh('source');
+my $TARGET_DBH = _open_dbh('target');
+
+
+
+## Ready to run...
+my $EXIT_CODE = 0;
+process_db();
+
+exit( $EXIT_CODE );
+
+
+
+## Subroutines
+
+sub process_db {
+  verbose("Working from source database '${SOURCE_DB}'");
+  verbose("Working  to  target database '${TARGET_DB}'");
+  
+  ## Create the target datbase if required
+  if(! _has_database($TARGET_DBH, $TARGET_DB)) {
+    verbose('DB does not exist on the target server; creating');
+    _create_database($TARGET_DBH, $TARGET_DB);
+  }
+  
+  ## This will change our connected to the equivalent target DB on
+  ## each DBH
+  _switch_db($SOURCE_DBH, $SOURCE_DB);
+  _switch_db($TARGET_DBH, $TARGET_DB);
+  
+  ## Grab lists of tables
+  my $SOURCE_TABLES = _schema_information($SOURCE_DBH, $SOURCE_DB);
+  my $TARGET_TABLES = _schema_information($TARGET_DBH, $TARGET_DB);
+  
+  ## Loop through tables (and views)
+  
+  ## Compare (and copy) those that differ
+  foreach my $table ( sort keys %{$SOURCE_TABLES} ) {
+      if ($SOURCE_TABLES->{$table}->{view}) {
+          _process_view($table,
+                        $SOURCE_TABLES->{$table},
+                        $TARGET_TABLES->{$table});
+      }
+      else{
+          _process_table($table,
+                         $SOURCE_TABLES->{$table},
+                         $TARGET_TABLES->{$table});
+      }
+  }
+  
+  
+  ## Remove those not in the source... Actually we just bitch about them
+  ## TODO: Should be made optional?
+  foreach my $table( sort keys %{$TARGET_TABLES} ) {
+      _remove_table($table,
+                    $SOURCE_TABLES->{$table},
+                    $TARGET_TABLES->{$table});
+  }
+  
+  ## Sanity check what we synced by row count
+  foreach my $table( sort keys %{$SOURCE_TABLES} ){
+    next if $SOURCE_TABLES->{$table}->{view};
+    next unless $SOURCE_TABLES->{$table}->{synced};
+    _assert_state($table);
+  }
+  
+  verbose("Finished with database '${SOURCE_DB}'");
+  
+  return;
+}
+
+
+
+sub _has_database {
+  my $dbh = shift;
+  my $db  = shift;
+  
+  my $sth = $dbh->
+      prepare('show databases like ?');
+  $sth->
+      execute($db);
+  
+  my $has_database = 0;
+  if(my $row = $sth->fetchrow_arrayref()) {
+    $has_database = 1;
+  }
+  $sth->finish();
+  
+  return $has_database;
+}
+
+
+
+sub _create_database {
+  my $dbh = shift;
+  my $db  = shift;
+  
+  my $q_db = $dbh->
+      quote_identifier($db);
+  
+  $dbh->do('create database '. $q_db);
+  return;
+}
+
+
+
+sub _switch_db {
+  my $dbh = shift;
+  my $db  = shift;
+  
+  my $q_db = $dbh->
+      quote_identifier($db);
+  return $dbh->do('use '. $q_db);
+}
+
+
+
+sub _schema_information {
+  my $dbh = shift;
+  my $db  = shift;
+  
+  my $schema_hash = {};
+  
+  my $sql = <<'SQL';
+SELECT
+  TABLE_NAME,
+  CREATE_TIME,
+  UPDATE_TIME,
+  TABLE_ROWS,
+  ENGINE,
+  TABLE_TYPE
+FROM
+  information_schema.TABLES
+WHERE
+  TABLE_SCHEMA =?
+SQL
+  
+  my $sth = $dbh->
+      prepare($sql);
+  $sth->
+      execute($db);
+  
+  while(my $row = $sth->fetchrow_arrayref()) {
+    my ($table, $created, $modified, $count, $engine, $type) = @{$row};
+    
+    $schema_hash->{$table} = {
+      count => $count,
+      view  => $type eq 'VIEW',
+    };
+    
+    my $date = $modified || $created;
+    $schema_hash->{$table}->{date} =
+      DateTime::Format::MySQL->parse_datetime($date)
+	  if defined $date;
+    
+    if(!$schema_hash->{view} && defined $engine && $engine eq 'InnoDB') {
+      $schema_hash->{$table}->{count} =
+          _perform_count($table, $dbh, $db);
+    }
+  }
+  $sth->finish();
+  
+  return $schema_hash;
+}
+
+
+
+sub _process_table {
+    my ($table, $source_info, $target_info) = @_;
+    
+    verbose("\tWorking on table '${table}'");
+    
+    my $populate_table = 0;
+    
+    if(!defined $target_info){
+        $populate_table = 1;
+    }
+    else {
+        
+        ## COMPARE BY DATE
+        if($OPTIONS->{date}) {
+            if(!defined $source_info->{date} ||
+               !defined $target_info->{date}) {
+                verbose("\tSource table date was undefined")
+                  if !defined $source_info->{date};
+                verbose("\tTarget table date was undefined")
+                  if !defined $target_info->{date};
+                
+                verbose("\tConsider switching to --count or --checksum checks or flush the status of the table");
+                
+                $populate_table = 1;
+            }
+            else {
+                ## Populate only if source is younger than targte
+                my $cmp = DateTime->
+                  compare_ignore_floating($source_info->{date},
+                                          $target_info->{date});
+                
+                $populate_table = ($cmp > 0) ? 1 : 0;
+            }
+        }
+        
+        ## COMPARE BY ROW COUNT
+        elsif($OPTIONS->{count}) {
+            ## Zero counts are returned for views
+            if(($source_info->{count} || 0) !=
+               ($target_info->{count} || 0)) {
+                $populate_table = 1;
+            }
+        }
+        
+        ## COMPARE BY CHECKSUM
+        elsif($OPTIONS->{checksum}) {
+            my $src = _checksum($SOURCE_DBH, $table);
+            my $trg = _checksum($TARGET_DBH, $table);
+            $populate_table = $src ne $trg;
+        }
+        
+        else {
+            die 'You have not said how to compare these schemas. Check the help';
+        }
+    }
+    
+    if($populate_table) {
+        verbose("\tTable must be synced");
+        _mysqlnag_populate_table($table);
+    }
+    else {
+        verbose("\tTable is OK according to the used test");
+    }
+    
+    ## It's good practice to analyze newly populated tables
+    _analyse($table);
+    
+    ## Keep track of synced tables for sanity checking
+    $source_info->{synced} = 1;
+    
+    verbose("\tFinished table");
+    return;
+}
+
+
+
+sub _checksum {
+  my ($dbh, $table) = @_;
+  my $q_table = $dbh->
+      quote_identifier($table);
+  my $sql = "CHECKSUM TABLE ${q_table}";
+  my @row_ary = $dbh->selectrow_array($sql);
+  return pop @row_ary;
+}
+
+
+
+sub _analyse {
+  my $table = shift;
+  my $dbh = $TARGET_DBH;
+  verbose("\tRunning analyse");
+  my $q_table =
+      $dbh->quote_identifier($table);
+  my $sql = "ANALYZE TABLE $q_table";
+  return $dbh->do($sql);
+}
+
+
+
+sub _process_view {
+    my ($view, $source_info, $target_info) = @_;
+    
+    verbose("\tWorking on view '${view}'");
+    
+    ## We don't do any checks, we just do it
+    _mysqlnag_populate_table($view, 1);
+}
+
+
+
+sub _mysqlnag_populate_table {
+    my $table = shift;
+    my $view_flag = shift;
+    
+    _toggle_foreign_key(0);
+    
+    my $view_hack = 'cat';
+    if($view_flag){
+        ## Surpress 'DEFINER', if we have to...
+        ## /*!50013 DEFINER=`admin`@`%` SQL SECURITY INVOKER */ -> ''
+        
+        $view_hack = 'sed "s/^\/\*\![0-9][0-9]* DEFINER=.* \*\/$//"';
+    }
+    
+    my $dump_log = File::Spec->catfile( _dir(), "$table.dump.log" );
+    my $load_log = File::Spec->catfile( _dir(), "$table.load.log" );
+    
+    my $copy_cmd;
+    
+    $copy_cmd .= "mysqldump \\\n";
+    $copy_cmd .= "  --host=$OPTIONS->{host} \\\n" if $OPTIONS->{host};
+    $copy_cmd .= "  --port=$OPTIONS->{port} \\\n" if $OPTIONS->{host};
+    $copy_cmd .= "  --user=$OPTIONS->{user} \\\n" if $OPTIONS->{user};
+    $copy_cmd .= "  --password=$OPTIONS->{password} \\\n" if $OPTIONS->{password};
+    
+    $copy_cmd .= "  --log-error=$dump_log \\\n";
+    $copy_cmd .= "  $SOURCE_DB $table \\\n";
+
+    $copy_cmd .= "  | $view_hack | \\\n";
+    
+    $copy_cmd .= "mysql \\\n";
+    $copy_cmd .= "  --host=$OPTIONS->{targethost} \\\n" if $OPTIONS->{targethost};
+    $copy_cmd .= "  --port=$OPTIONS->{targetport} \\\n" if $OPTIONS->{targethost};
+    $copy_cmd .= "  --user=$OPTIONS->{targetuser} \\\n" if $OPTIONS->{targetuser};
+    $copy_cmd .= "  --password=$OPTIONS->{targetpassword} \\\n" if $OPTIONS->{targetpassword};
+    
+    $copy_cmd .= "  --show-warnings \\\n";
+    $copy_cmd .= "  $TARGET_DB \\\n";
+    $copy_cmd .= "  > $load_log";
+    
+    #verbose($copy_cmd);
+    system($copy_cmd)
+      and die "Could not complete the dump! Check the logs : $!";
+    
+    _toggle_foreign_key(1);
+    
+    return;
+}
+
+
+
+## Note, we only need to do this on the TARGET database (we don't
+## touch the SOURCE database). This is no longer optional, for
+## simplicity (takes practically no time when it isn't important).
+sub _toggle_foreign_key {
+  my $on = shift;
+  my $cmd = ($on) ? 1 : 0;
+  
+  verbose("\t\tToggling foreign key checks to '$cmd'");
+  $TARGET_DBH->do( "SET foreign_key_checks = $cmd" );
+  
+  return;
+}
+
+
+
+sub _dir {
+  my $dir = File::Spec->
+    catdir($OPTIONS->{directory}, $SOURCE_DB);
+  if(! -d $dir) {
+    make_path( $dir, {verbose => 0} )
+      or die "Cannot create directory $dir: $!";
+    ### The MySQL server has to write...
+    #my $mode = 0777;
+    #chmod $mode, $dir or die "Cannot chmod $dir to mode $mode: $!";
+  }
+  return $dir;
+}
+
+
+
+sub _remove_table {
+  my ($table, $source_info, $target_info) = @_;
+  
+  if(! defined $source_info && $target_info) {
+    verbose("\tTable '${table}' exists on the target server but not on the local server");
+  }
+  return;
+}
+
+
+
+## Assertion is based on a table count
+sub _assert_state {
+  my ($table) = @_;
+  my $sql = 'select count(*) from '.$SOURCE_DBH->quote_identifier($table);
+  my $source_count = _perform_count($table, $SOURCE_DBH);
+  my $target_count = _perform_count($table, $TARGET_DBH);
+  if($source_count != $target_count) {
+    print STDERR "FAIL: ${table} row count do not match in the source and target schema\n";
+    $EXIT_CODE = 1;
+  }
+  return;
+}
+
+
+
+sub _perform_count {
+  my ($table, $dbh, $schema) = @_;
+  
+  my @name;
+  push(@name, $schema) if $schema;
+  push(@name, $table);
+  my $qualified_name =
+      join( q{.}, map { $dbh->quote_identifier($_) } @name );
+  
+  my $sql = 'SELECT COUNT(*) FROM '. $qualified_name;
+  my ($count) = $dbh->
+      selectrow_array($sql);
+  
+  return $count;
+}
+
+
+
+sub verbose {
+  if ($VERBOSE) {
+    warn @_, "\n";
+  }
+  return;
+}
+
+
+
+## Common subs...
+
+sub _parse_options {
+  my @options = qw(
+    host=s targethost=s
+    port=i targetport=i
+    user=s targetuser=s
+    password=s targetpassword=s
+    database=s targetdatabase=s
+
+    checksum count date
+
+    verbose
+    version
+    help|?
+    man
+  );
+  
+  my $opts = {};
+  
+  # Populates $opts
+  GetOptions( $opts, @options )
+      or pod2usage(2);
+  
+  pod2usage(1)            if $opts->{help};
+  pod2usage(VERBOSE => 2) if $opts->{man};
+  
+  _process_options($opts);
+  
+  return $opts;
+}
+
+
+
+sub _process_options {
+  my ($opts) = @_;
+  
+  if ( $opts->{version} ) {
+    print "mysqlnaga-sync version $VERSION\n";
+    exit(0);
+  }
+  
+  if ( !$opts->{database} ) {
+    warn "\nNeed a schema to work with (--database)\n\n";
+    pod2usage(EXIT => 64, VERBOSE => 0);
+  }
+  
+  if ( !$opts->{date} && !$opts->{count} && !$opts->{checksum}) {
+      warn "\nNeed a method to compare tables (--date|--count|--checksum)\n\n";
+      pod2usage(EXIT => 64, VERBOSE => 0);
+  }
+  
+  $opts->{directory} ||= '.';
+  $opts->{directory} = File::Spec->rel2abs($opts->{directory});
+  
+  $opts->{targetdatabase} ||= $opts->{database};
+  
+  ## TODO: set 'targetx' options to 'x' if undef?
+  
+  return;
+}
+
+
+
+## Doesn't DBI provide a helper for this?
+sub _open_dbh {
+    my $type = shift || 'source';
+
+    ## If type is 'target', we use an alternative set of options,
+    ## simply distinguished by a consistent prefix
+    my $option_prefix = $type eq 'target' ? 'target' : '';
+    
+    ## Read the options
+    my $host = $OPTIONS->{$option_prefix. 'host'} || '';
+    my $port = $OPTIONS->{$option_prefix. 'port'} || '';
+    my $user = $OPTIONS->{$option_prefix. 'user'} || undef;
+    my $password = $OPTIONS->{$option_prefix. 'password'} || undef;
+    
+    ## We 'DNS-ify' some of the options:
+    $host = "host=$host" if $host;
+    $port = "port=$port" if $port;
+    
+    ## And handle a couple of others...
+    my $block = $OPTIONS->{blocking_select} ? "mysql_use_result=1" : '';
+    my $extra = "mysql_local_infile=1";
+    
+    ## Build the DSN
+    my $dsn = "DBI:mysql:".
+        join(';', $host, $port, $block, $extra);
+    
+    verbose("DSN:$dsn");
+    
+    return
+      DBI->connect( $dsn, $user, $password, { RaiseError => 1 } );
+}
+
+__END__
+
+=pod
+
+=head1 DESCRIPTION
+
+Dumps tables and views from a database on one MySQL server to another,
+possibly renaming the database 'on the fly'. Tables and views are only
+transfered if one of the following conditions is true:
+
+=over 8
+
+=item A SOURCE table does not exist in the TARGET schema,
+
+=item the last modified time for the table in the SOURCE schema is later than in the TARGET schema,
+
+=item the table row counts differ, or
+
+=item MySQL checksums differ.
+
+=back
+
+You can choose one of these strategies to detect when a transfer
+should occur however the recommened is last modified time as this
+requires the smallest amount of work from the database.
+
+The code will remove any dump files from a target directory if you are
+building incremental flat file dumps (for backup or public release of
+a database) and after a load will ensure that the row counts of the
+tables match each other in the source and target database.
+
+Views are not properly supported. The code assumes the target server
+has the same user settings as the current server
+
+
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--checksum> | B<--count> | B<--date>
+
+One of these options is mandatory:
+
+* Use MySQL checksums to calculate if a table has changed
+* Use row counts to calculate if a table has changed
+* Use the last modified/created date to calculate if a table has changed
+
+
+=item B<--directory>
+
+The base directory to dump LOG files. If not specified the program
+will use $CWD. A directory will be created in the base directory with
+same name as the (source) database being transferred. All LOG files
+will be created under that directory.
+
+
+=item B<--(target)database>
+
+The (target) database to work with.
+
+
+=item B<--(target)host>, B<--(target)port>, B<--(target)user>, B<--(target)password>
+
+The connection details for the (target) MySQL server for the given
+(target) database.
+
+
+=item B<--verbose>
+
+Print verbose logging messages along with the dump. These go to
+STDERR.
+
+=back
+
+
+
+=head1 DEPENDENCIES
+
+=over 8
+
+=item DBD::mysql
+
+=item DateTime
+
+=item DateTime::Format::MySQL
+
+=back
+
+
+
+=head1 WHY NAG?
+
+Because the program is slow like an old nag.
+
+
+
+=head1 AUTHOR
+
+Andrew Yates
+Dan B
+
+
+
+=head1 LICENSE
+
+Copyright (c) 2010, EMBL
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that thefollowing conditions are
+met:
+
+* Redistributions of source code must retain the above copyright
+  notice, this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright
+  notice, this list of conditions and the following disclaimer in the
+  documentation and/or other materials provided with the distribution.
+
+* Neither the name of the EMBL nor the names of its contributors may
+  be used to endorse or promote products derived from this software
+  without specific prior written permission.
+
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+
+=head1 VERSION
+
+0.1
+
+=cut
