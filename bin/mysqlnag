@@ -5,12 +5,11 @@ use warnings;
 
 our $VERSION = '0.1';
 
-#use Cwd;
-#use DateTime;
 use DateTime::Format::MySQL;
+
 use DBI;
-#use File::Find;
-use File::Path qw(make_path);
+
+use File::Path qw( make_path );
 use File::Spec;
 
 use Getopt::Long;
@@ -41,7 +40,9 @@ my $OPTIONS = _parse_options();
 ## These options are used often, so we re-define them here
 my $SOURCE_DB = $OPTIONS->{database};
 my $TARGET_DB = $OPTIONS->{targetdatabase};
+
 my $VERBOSE   = $OPTIONS->{verbose};
+my $NO_DUMP   = $OPTIONS->{'no-dump'};
 
 my $SOURCE_DBH = _open_dbh('source');
 my $TARGET_DBH = _open_dbh('target');
@@ -103,10 +104,12 @@ sub process_db {
   }
   
   ## Sanity check what we synced by row count
-  foreach my $table( sort keys %{$SOURCE_TABLES} ){
-    next if $SOURCE_TABLES->{$table}->{view};
-    next unless $SOURCE_TABLES->{$table}->{synced};
-    _assert_state($table);
+  unless($NO_DUMP){
+      foreach my $table( sort keys %{$SOURCE_TABLES} ){
+          next if $SOURCE_TABLES->{$table}->{view};
+          next unless $SOURCE_TABLES->{$table}->{synced};
+          _assert_state($table);
+      }
   }
   
   verbose("Finished with database '${SOURCE_DB}'");
@@ -280,7 +283,7 @@ sub _process_table {
     ## Keep track of synced tables for sanity checking
     $source_info->{synced} = 1;
     
-    verbose("\tFinished table");
+    verbose("\tFinished table\n");
     return;
 }
 
@@ -316,6 +319,12 @@ sub _process_view {
     
     ## We don't do any checks, we just do it
     _mysqlnag_populate_table($view, 1);
+    
+    ## Keep track of synced views for sanity checking
+    $source_info->{synced} = 1;
+
+    verbose("\tFinished view\n");
+    return;
 }
 
 
@@ -324,7 +333,8 @@ sub _mysqlnag_populate_table {
     my $table = shift;
     my $view_flag = shift;
     
-    _toggle_foreign_key(0);
+    _toggle_foreign_key(0)
+        unless $NO_DUMP;
     
     my $view_hack = 'cat';
     if($view_flag){
@@ -347,7 +357,7 @@ sub _mysqlnag_populate_table {
     
     $copy_cmd .= "  --log-error=$dump_log \\\n";
     $copy_cmd .= "  $SOURCE_DB $table \\\n";
-
+    
     $copy_cmd .= "  | $view_hack | \\\n";
     
     $copy_cmd .= "mysql \\\n";
@@ -361,10 +371,16 @@ sub _mysqlnag_populate_table {
     $copy_cmd .= "  > $load_log";
     
     #verbose($copy_cmd);
-    system($copy_cmd)
-      and die "Could not complete the dump! Check the logs : $!";
+    unless($NO_DUMP){
+        system($copy_cmd)
+            and die "Could not complete the dump! Check the logs : $!";
+    }
+    else{
+        warn "NOT DUMPING (--no-dump)\n";
+    }
     
-    _toggle_foreign_key(1);
+    _toggle_foreign_key(1)
+        unless $NO_DUMP;
     
     return;
 }
@@ -392,9 +408,6 @@ sub _dir {
   if(! -d $dir) {
     make_path( $dir, {verbose => 0} )
       or die "Cannot create directory $dir: $!";
-    ### The MySQL server has to write...
-    #my $mode = 0777;
-    #chmod $mode, $dir or die "Cannot chmod $dir to mode $mode: $!";
   }
   return $dir;
 }
@@ -402,12 +415,12 @@ sub _dir {
 
 
 sub _remove_table {
-  my ($table, $source_info, $target_info) = @_;
-  
-  if(! defined $source_info && $target_info) {
-    verbose("\tTable '${table}' exists on the target server but not on the local server");
-  }
-  return;
+    my ($table, $source_info, $target_info) = @_;
+    
+    if(! defined $source_info && $target_info) {
+        warn "\tWARNING: Table '$table' exists on TARGET but not on SOURCE!\n";
+    }
+    return;
 }
 
 
@@ -467,6 +480,8 @@ sub _parse_options {
     checksum count date
 
     verbose
+    no-dump
+
     version
     help|?
     man
@@ -512,6 +527,8 @@ sub _process_options {
   $opts->{targetdatabase} ||= $opts->{database};
   
   ## TODO: set 'targetx' options to 'x' if undef?
+  
+  ## Doing this could be problematic!
   
   return;
 }
@@ -581,8 +598,7 @@ building incremental flat file dumps (for backup or public release of
 a database) and after a load will ensure that the row counts of the
 tables match each other in the source and target database.
 
-Views are not properly supported. The code assumes the target server
-has the same user settings as the current server
+Views are always copied over (as in mysqlnaga-sync).
 
 
 
@@ -594,10 +610,15 @@ has the same user settings as the current server
 
 One of these options is mandatory:
 
-* Use MySQL checksums to calculate if a table has changed
-* Use row counts to calculate if a table has changed
-* Use the last modified/created date to calculate if a table has changed
+=over 8
 
+=item * Use MySQL checksums to calculate if a table has changed
+
+=item * Use row counts to calculate if a table has changed
+
+=item * Use the last modified/created date to calculate if a table has changed
+
+=back
 
 =item B<--directory>
 
@@ -632,8 +653,6 @@ STDERR.
 =over 8
 
 =item DBD::mysql
-
-=item DateTime
 
 =item DateTime::Format::MySQL
 
