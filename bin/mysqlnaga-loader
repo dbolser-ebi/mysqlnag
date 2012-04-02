@@ -15,8 +15,21 @@ use Getopt::Long;
 use Pod::Usage;
 use Tie::File;
 use Memoize;
-
 memoize('_columns');
+
+=pod
+
+=head1 NAME
+
+mysqlnaga
+
+=head1 SYNOPSIS
+
+  ./mysqlnaga -database DB [-directory DIR] \
+    [-host HOST] [-port PORT] [-user USER] [-pass PASS] \
+    [more options in -h]
+
+=cut
 
 my %BINARY_COLUMNS = (
   TINYBLOB => 1,
@@ -31,21 +44,23 @@ my %BINARY_COLUMNS = (
 
 my $LOG_FILENAME = 'LOADER-LOG.txt';
 
-my %OPTIONS = _parse_options();
+my $OPTIONS = _parse_options();
 
-my $DB  = $OPTIONS{database};
-my $LTB = $OPTIONS{'lines-terminated-by'};
-my $FTB = $OPTIONS{'fields-terminated-by'};
-my $FEB = $OPTIONS{'fields-optionally-enclosed-by'};
-my $VERBOSE = $OPTIONS{verbose};
+my $DB  = $OPTIONS->{database};
+my $LTB = $OPTIONS->{'lines-terminated-by'};
+my $FTB = $OPTIONS->{'fields-terminated-by'};
+my $FEB = $OPTIONS->{'fields-optionally-enclosed-by'};
+my $VERBOSE = $OPTIONS->{verbose};
 
 my $DBH = _open_dbh();
+_switch_db($DBH, $DB); # Sorry!
+
 my %DB_TABLES = _db_tables();
 my %TABLES;
 
 my ($_record_file) = _find_in_dir(qr/^\${LOG_FILENAME}/xms);
 if(! $_record_file) {
-	$_record_file = File::Spec->catfile($OPTIONS{directory}, $LOG_FILENAME);
+	$_record_file = File::Spec->catfile($OPTIONS->{directory}, $LOG_FILENAME);
 }
 tie my @RECORDS, 'Tie::File', $_record_file or confess("Cannot open file $_record_file : $!");
 my %PROCESSED_RECORDS = _process_records();
@@ -138,7 +153,7 @@ sub _parse_options {
 		exit(0);
 	}
 	_confirm_options($opts);
-	return %{$opts};
+	return $opts;
 }
 
 sub _confirm_options {
@@ -171,11 +186,11 @@ sub _squirt_sql {
 	}
 	
 	my @args = (
-		($OPTIONS{host}) ? '--host='.$OPTIONS{host} : q{},
-		($OPTIONS{port}) ? '--port='.$OPTIONS{port} : q{},
-		($OPTIONS{user}) ? '--user='.$OPTIONS{user} : q{},
-		($OPTIONS{password}) ? '--password='.$OPTIONS{password} : q{},
-		$OPTIONS{database},
+		($OPTIONS->{host}) ? '--host='.$OPTIONS->{host} : q{},
+		($OPTIONS->{port}) ? '--port='.$OPTIONS->{port} : q{},
+		($OPTIONS->{user}) ? '--user='.$OPTIONS->{user} : q{},
+		($OPTIONS->{password}) ? '--password='.$OPTIONS->{password} : q{},
+		$OPTIONS->{database},
 		$sql
 	);
 	my $cmd = sprintf('mysql %s %s %s %s %s < %s', @args);
@@ -190,7 +205,7 @@ sub _squirt_sql {
 
 sub _db_tables {
 	my %tables;
-	my $sth = $DBH->table_info(undef, $OPTIONS{database}, '%');
+	my $sth = $DBH->table_info(undef, $OPTIONS->{database}, '%');
 	while(my $row = $sth->fetchrow_arrayref()) {
 		$tables{$row->[2]} = 1;	
 	}
@@ -201,8 +216,8 @@ sub _db_tables {
 #Load only the specified tables or all of them in the DB
 sub _tables {
 	my %tables;
-	if($OPTIONS{tables}) {
-		%tables = map {$_ => 1} split(/,/, $OPTIONS{tables});
+	if($OPTIONS->{tables}) {
+		%tables = map {$_ => 1} split(/,/, $OPTIONS->{tables});
 	}
 	else {
 		%tables = _db_tables();	
@@ -230,13 +245,13 @@ sub _find_in_dir {
 			push(@files, $File::Find::name);
 		}
 		return;
-	}, $OPTIONS{directory});
+	}, $OPTIONS->{directory});
 	return @files;
 }
 
 sub _nuke {
   my ($table) = @_;
-  if($OPTIONS{nuke}) {
+  if($OPTIONS->{nuke}) {
     verbose("\tNuking ${table}");
     $DBH->do("truncate table ${table}");
   }
@@ -259,11 +274,11 @@ sub _load {
 	
 	my @args = (
 		$file,
-		($OPTIONS{replace}) ? 'REPLACE' : ($OPTIONS{ignore}) ? 'IGNORE' : q{},
+		($OPTIONS->{replace}) ? 'REPLACE' : ($OPTIONS->{ignore}) ? 'IGNORE' : q{},
 		$table,
 		$field_opts,
 		qq{lines terminated by '${LTB}'},
-		($OPTIONS{'skip_lines'}) ? 'ignore '.$OPTIONS{'skip_lines'}.' lines' : q{},
+		($OPTIONS->{'skip_lines'}) ? 'ignore '.$OPTIONS->{'skip_lines'}.' lines' : q{},
 		_generate_column_string($table)
 	);
 	
@@ -286,7 +301,7 @@ sub _load {
 
 sub _toggle_indexes {
 	my ($table, $on) = @_;
-	if($OPTIONS{'turn-off-indexes'}) {
+	if($OPTIONS->{'turn-off-indexes'}) {
 		my $cmd = ($on) ? 'ENABLE' : 'DISABLE';
 		verbose("\t\tToggling indexes to '$cmd'");
 		my $ddl = qq{ALTER TABLE $table $cmd KEYS};
@@ -300,7 +315,7 @@ sub _toggle_indexes {
 
 sub _toggle_foreign_key {
   my ($on) = @_;
-  if($OPTIONS{'disable-foreign-keys'}) {
+  if($OPTIONS->{'disable-foreign-keys'}) {
     my $cmd = ($on) ? 1 : 0;
     verbose("\t\tToggling foreign key checks to '$cmd'");
     my $ddl = qq{set foreign_key_checks=$cmd};
@@ -347,17 +362,7 @@ sub _generate_column_string {
   return sprintf('(%s) %s', join(',', @column_names), $sets_string);  
 }
 
-__END__
-
 =pod
-
-=head1 NAME
-
-mysqlnaga
-
-=head1 SYNOPSIS
-
-	./mysqlnaga -database DB [-directory DIR] [-host HOST] [-port PORT] [-user USER] [-pass PASS] [more options in -h]
 
 =head1 DESCRIPTION
 
@@ -514,3 +519,54 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 1.0
 
 =cut
+
+## Subroutines common to all programs. Although this is a package, we
+## simply 'requier' it for ease of installation. CPAN you say?
+
+sub verbose {
+  if ($VERBOSE) {
+    warn @_, "\n";
+  }
+  return;
+}
+
+## Doesn't DBI provide a helper for this?
+sub _open_dbh {
+    my $type = shift || 'source';
+
+    ## If type is 'target', we use an alternative set of options,
+    ## simply distinguished by a consistent prefix
+    my $option_prefix = $type eq 'target' ? 'target' : '';
+    
+    ## Read the options
+    my $host = $OPTIONS->{$option_prefix. 'host'} || '';
+    my $port = $OPTIONS->{$option_prefix. 'port'} || '';
+    my $user = $OPTIONS->{$option_prefix. 'user'} || undef;
+    my $password = $OPTIONS->{$option_prefix. 'password'} || undef;
+    
+    ## We 'DNS-ify' some of the options:
+    $host = "host=$host" if $host;
+    $port = "port=$port" if $port;
+    
+    ## And handle a couple of others...
+    my $block = $OPTIONS->{blocking_select} ? "mysql_use_result=1" : '';
+    my $extra = "mysql_local_infile=1";
+    
+    ## Build the DSN
+    my $dsn = "DBI:mysql:".
+        join(';', $host, $port, $block, $extra);
+    
+    verbose("DSN:$dsn");
+    
+    return
+      DBI->connect( $dsn, $user, $password, { RaiseError => 1 } );
+}
+
+sub _switch_db {
+  my $dbh = shift;
+  my $db  = shift;
+  
+  my $q_db = $dbh->
+      quote_identifier($db);
+  return $dbh->do('use '. $q_db);
+}
