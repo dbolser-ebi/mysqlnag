@@ -3,8 +3,6 @@
 use strict;
 use warnings;
 
-require('subs.pm');
-
 our $VERSION = '1.0';
 
 use Cwd;
@@ -38,23 +36,29 @@ mysqlnaga-sync
 
 my $OPTIONS = _parse_options();
 
-my $DB        = $OPTIONS->{database};
+my $SOURCE_DB = $OPTIONS->{database};
 my $TARGET_DB = $OPTIONS->{targetdatabase};
-my $VERBOSE   = $OPTIONS->{verbose};
-my $NO_DUMP   = $OPTIONS->{'no-dump'};
-my $NO_VIEWS  = $OPTIONS->{'no-views'};
 
-my $SOURCE_DBH    = _open_dbh('source');
-my $TARGET_DBH    = _open_dbh('target');
+my $VERBOSE    = $OPTIONS->{verbose};
+my $NO_DUMP    = $OPTIONS->{'no-dump'};
+my $NO_VIEWS   = $OPTIONS->{'no-views'};
+my $USE_NAGA   = $OPTIONS->{'use-naga'};
+my $DISABLE_FK = $OPTIONS->{'disable-foreign-keys'};
 
-my $SOURCE_TABLES = _schema_information($SOURCE_DBH);
+my $SOURCE_DBH = _open_dbh('source');
+my $TARGET_DBH = _open_dbh('target');
 
+
+
+#use Data::Dumper;
+#print Dumper $OPTIONS;
+#exit;
+
+## Ready to run...
 my $EXIT_CODE = 0;
 
-
-
-## Go time...
 process_db();
+
 exit $EXIT_CODE;
 
 
@@ -62,59 +66,69 @@ exit $EXIT_CODE;
 ## Subroutines
 
 sub process_db {
-  verbose("Working from database '${DB}'");
-  verbose("Working to target database '${TARGET_DB}'");
+  verbose("Working from source database '${SOURCE_DB}'");
+  verbose("Working  to  target database '${TARGET_DB}'");
   
-  if(! _has_database($TARGET_DBH)) {
+  if(! _has_database($TARGET_DBH, $TARGET_DB)) {
     verbose('DB does not exist on the target server; creating');
-    _create_database($TARGET_DBH);
+    _create_database($TARGET_DBH, $TARGET_DB);
   }
   
-  my $TARGET_TABLES = _schema_information($TARGET_DBH);
+  ## This will change our connected to the equivalent target DB on
+  ## each DBH
+  _switch_db($SOURCE_DBH, $SOURCE_DB);
+  _switch_db($TARGET_DBH, $TARGET_DB);
   
-  #This will change our connected to the equivalent target DB on each DBH 
-  _switch_db($SOURCE_DBH);
-  _switch_db($TARGET_DBH);
+  my $SOURCE_TABLES = _schema_information($SOURCE_DBH, $SOURCE_DB);
+  my $TARGET_TABLES = _schema_information($TARGET_DBH, $TARGET_DB);
   
-  #Loop through tables first
+  ## Loop through tables (and views)
+  
+  ## Compare and copy those that differ
   foreach my $table ( sort keys %{$SOURCE_TABLES} ) {
-    next if $SOURCE_TABLES->{$table}->{view};
-    _process_table($table, $SOURCE_TABLES->{$table}, $TARGET_TABLES->{$table});
-  }
-  
-  #Loop through the views
-  foreach my $table ( sort keys %{$SOURCE_TABLES} ) {
-    next if ! $SOURCE_TABLES->{$table}->{view};
-    if(! $NO_VIEWS) {
-      _process_view($table, $SOURCE_TABLES->{$table}, $TARGET_TABLES->{$table});
-    }
-  }
-  
-  foreach my $table( sort keys %{$TARGET_TABLES}) {
-    if($TARGET_TABLES->{$table}->{view}) {
-      if(! $NO_VIEWS) {
-        _remove_view($table, $SOURCE_TABLES->{$table}, $TARGET_TABLES->{$table});
+      if (!$SOURCE_TABLES->{$table}->{view}){
+          _process_table($table,
+                         $SOURCE_TABLES->{$table},
+                         $TARGET_TABLES->{$table});
       }
-    }
-    else {
-      _remove_table($table, $SOURCE_TABLES->{$table}, $TARGET_TABLES->{$table});
-    }
+      elsif(!$NO_VIEWS){
+          _process_view($table,
+                        $SOURCE_TABLES->{$table},
+                        $TARGET_TABLES->{$table});
+      }
   }
   
-  foreach my $table( sort keys %{$SOURCE_TABLES}) {
+  
+  ## Remove those not in the source (should be made optional?)
+  foreach my $table( sort keys %{$TARGET_TABLES}) {
+      if (!$TARGET_TABLES->{$table}->{view}) {
+          _remove_table($table,
+                        $SOURCE_TABLES->{$table},
+                        $TARGET_TABLES->{$table});
+      }
+      elsif(!$NO_VIEWS){
+          _remove_view($table,
+                       $SOURCE_TABLES->{$table},
+                       $TARGET_TABLES->{$table});
+      }
+  }
+  
+  
+  ## What does this do?
+  foreach my $table( sort keys %{$SOURCE_TABLES} ){
     next if $SOURCE_TABLES->{$table}->{view};
     next unless $SOURCE_TABLES->{$table}->{synced};
     _assert_state($table);
   }
   
-  if($OPTIONS->{'use-naga'}) {
+  if($USE_NAGA) {
     verbose("\tRemoving LOADER-LOG.txt");
-    my $filename = File::Spec->catfile(_dir(), 'LOADER-LOG.txt');
+    my $filename = File::Spec->catfile( _dir(), 'LOADER-LOG.txt' );
     unlink $filename;
     verbose("\tLOADER-LOG.txt gone");
   }
   
-  verbose("Finished with database '${DB}'");
+  verbose("Finished with database '${SOURCE_DB}'");
   
   return;
 }
@@ -123,18 +137,22 @@ sub _process_table {
   my ($table, $source_info, $target_info) = @_;
 
   verbose("\tWorking on table '${table}'");
-
+  
   my $drop_table = 0;
   my $populate_table = 0;
-
+  
   if(defined $target_info) {
-    #Populate only if source is younger than target
+    
+    ## Populate only if source is younger than targte
     if($OPTIONS->{date}) {
-      #Returns -1 if source was older than target, 0 if equal & 1 if younger
-      #i.e. same situation which means we need to populate
+        
+      ## Returns -1 if source was older than target, 0 if equal & 1 if
+      ## younger i.e. same situation which means we need to populate
       if(! defined $source_info->{date} || ! defined $target_info->{date}) {
-        verbose("\tSource table date was undefined") if ! defined $source_info->{date};
-        verbose("\tTarget table date was undefined") if ! defined $target_info->{date};
+        verbose("\tSource table date was undefined")
+            if ! defined $source_info->{date};
+        verbose("\tTarget table date was undefined")
+            if ! defined $target_info->{date};
         verbose("\tConsider switching to --count or --checksum checks or flush the status of the table");
         $drop_table = 1;
         $populate_table = 1;
@@ -146,20 +164,23 @@ sub _process_table {
         $populate_table = $drop_table;
       }
     }
-    #Populate if counts differ
+    
+    ## Populate if counts differ
     elsif($OPTIONS->{count}) {
       if($source_info->{count} != $target_info->{count}) {
         $drop_table = 1;
         $populate_table = 1;
       }
     }
-    #Populate if checksums differ
+    
+    ## Populate if checksums differ
     elsif($OPTIONS->{checksum}) {
       my $src = _checksum($SOURCE_DBH, $table);
       my $trg = _checksum($TARGET_DBH, $table);
       $drop_table = $src ne $trg ;
       $populate_table = $drop_table;
     }
+    
     else {
       die 'You have not said how to compare these schemas. Check the help';
     }
@@ -168,14 +189,17 @@ sub _process_table {
     $populate_table = 1;
   }
   
+  
   if($drop_table) {
     verbose("\tTable must be dropped");
     _drop_table($TARGET_DBH, $table);
   }
   
+  
   if($populate_table) {
     verbose("\tTable must be repopulated");
-    if($OPTIONS->{'use-naga'}) {
+    
+    if($USE_NAGA) {
       verbose("\tUsing naga");
       _mysqlnaga_populate_table($table);
     }
@@ -183,23 +207,28 @@ sub _process_table {
       verbose("\tUsing mysqldump");
       _mysqldump_populate_table($table);
     }
+    
+    
     _analyse($table);
     $source_info->{synced} = 1;
   }
   else {
     verbose("\tTable is okay according to the used test");
   }
-
+  
   verbose("\tFinished table");
   return;
 }
 
 sub _remove_table {
   my ($table, $source_info, $target_info) = @_;
+  
   if(! defined $source_info && $target_info) {
     verbose("\tTable '${table}' exists on the target server but not on the local server");
     _drop_table($TARGET_DBH, $table);
     verbose("\tTable '${table}' has been dropped");
+    
+    ## Removing from filesystem
     find({ wanted => sub {
       my $name = $_;
       foreach my $suffix (qw(sql txt)) {
@@ -211,7 +240,7 @@ sub _remove_table {
       }
       return;
     }}, _dir());
-    return;
+    verbose("\tTable '$table' has been dropped");
   }
   return;
 }
@@ -231,10 +260,12 @@ sub _process_view {
 
 sub _remove_view {
   my ($view, $source_info, $target_info) = @_;
+  
   if(! defined $source_info && defined $target_info) {
     verbose("\tView '$view' does not exist on the source server. Dropping from target");
     _drop_view($TARGET_DBH, $view);
-    #Removing from filesystem
+    
+    ## Removing from filesystem
     find({ wanted => sub {
       my $name = $_;
       foreach my $suffix (qw(sql txt)) {
@@ -251,7 +282,7 @@ sub _remove_view {
   return;
 }
 
-#Assertion is based on a table count
+## Assertion is based on a table count
 sub _assert_state {
   my ($table) = @_;
   my $sql = 'select count(*) from '.$SOURCE_DBH->quote_identifier($table);
@@ -266,12 +297,17 @@ sub _assert_state {
 
 sub _perform_count {
   my ($table, $dbh, $schema) = @_;
+  
   my @name;
   push(@name, $schema) if $schema;
   push(@name, $table);
-  my $qualified_name = join(q{.}, map { $dbh->quote_identifier($_) } @name);
-  my $sql = 'select count(*) from '.$qualified_name;
-  my ($count) = $dbh->selectrow_array($sql);
+  my $qualified_name =
+      join( q{.}, map { $dbh->quote_identifier($_) } @name );
+  
+  my $sql = 'SELECT COUNT(*) FROM '. $qualified_name;
+  my ($count) = $dbh->
+      selectrow_array($sql);
+  
   return $count; 
 }
 
@@ -303,8 +339,8 @@ sub _parse_options {
   GetOptions( $opts, @options )
       or pod2usage(2);
   
-  pod2usage(1) if $opts->{help};
-  pod2usage( -exitstatus => 0, -verbose => 2 ) if $opts->{man};
+  pod2usage(1)            if $opts->{help};
+  pod2usage(VERBOSE => 2) if $opts->{man};
   
   if ( $opts->{version} ) {
     print "mysqlnaga-sync version $VERSION\n";
@@ -320,8 +356,8 @@ sub _confirm_options {
   my ($opts) = @_;
   
   if ( !$opts->{database} ) {
-    print STDERR "Need a schema to work with (--database)\n";
-    pod2usage(1);
+    warn "\nNeed a schema to work with (--database)\n\n";
+    pod2usage(EXIT => 64, VERBOSE => 0);
   }
   
   $opts->{directory} ||= '.';
@@ -333,9 +369,11 @@ sub _confirm_options {
 }
 
 sub _schema_information {
-  my ($dbh) = @_;
+  my $dbh = shift;
+  my $db  = shift;
+  
   my $schema_hash = {};
-
+  
   my $sql = <<'SQL';
 SELECT
   TABLE_NAME,
@@ -345,64 +383,81 @@ SELECT
   ENGINE,
   TABLE_TYPE
 FROM
-  information_schema.TABLES 
+  information_schema.TABLES
 WHERE
   TABLE_SCHEMA =?
 SQL
-
-  my $sth = $dbh->prepare($sql);
-  $sth->execute($OPTIONS->{database});
-
+  
+  my $sth = $dbh->
+      prepare($sql);
+  $sth->
+      execute($db);
+  
   while(my $row = $sth->fetchrow_arrayref()) {
     my ($table, $created, $modified, $count, $engine, $type) = @{$row};
-
+    
     $schema_hash->{$table} = {
       count => $count,
       view  => $type eq 'VIEW',
     };
-
+    
     my $date = $modified || $created;
     $schema_hash->{$table}->{date} =
       DateTime::Format::MySQL->parse_datetime($date)
 	  if defined $date;
-
+    
     if(!$schema_hash->{view} && defined $engine && $engine eq 'InnoDB') {
-      $schema_hash->{$table}->{count} = _perform_count($table, $dbh, $OPTIONS->{database});
+      $schema_hash->{$table}->{count} =
+          _perform_count($table, $dbh, $db);
     }
   }
   $sth->finish();
+  
   return $schema_hash;
 }
 
 sub _has_database {
-  my ($dbh) = @_;
-  my $sth = $dbh->prepare('show databases like ?');
-  $sth->execute($OPTIONS->{database});
+  my $dbh = shift;
+  my $db  = shift;
+  
+  my $sth = $dbh->
+      prepare('show databases like ?');
+  $sth->
+      execute($db);
+  
   my $has_database = 0;
   if(my $row = $sth->fetchrow_arrayref()) {
     $has_database = 1;
   }
   $sth->finish();
+  
   return $has_database;
 }
 
 sub _create_database {
-  my ($dbh) = @_;
-  my $q_db = $dbh->quote_identifier($OPTIONS->{database});
-  $dbh->do('create database '.$q_db);
+  my $dbh = shift;
+  my $db  = shift;
+  
+  my $q_db = $dbh->
+      quote_identifier($db);
+  
+  $dbh->do('create database '. $q_db);
   return;
 }
 
 sub _switch_db {
-  my ($dbh) = @_;
-  my $q_db = $dbh->quote_identifier($OPTIONS->{database});
-  $dbh->do('use '.$q_db);
-  return;
+  my $dbh = shift;
+  my $db  = shift;
+  
+  my $q_db = $dbh->
+      quote_identifier($db);
+  return $dbh->do('use '. $q_db);
 }
 
 sub _checksum {
   my ($dbh, $table) = @_;
-  my $q_table = $dbh->quote_identifier($table);
+  my $q_table = $dbh->
+      quote_identifier($table);
   my $sql = "CHECKSUM TABLE ${q_table}";
   my @row_ary = $dbh->selectrow_array($sql);
   return pop @row_ary;
@@ -412,26 +467,26 @@ sub _analyse {
   my ($table) = @_;
   my $dbh = $TARGET_DBH;
   verbose("\tRunning analyse");
-  my $q_table = $dbh->quote_identifier($table);
+  my $q_table =
+      $dbh->quote_identifier($table);
   my $sql = "ANALYZE TABLE $q_table";
-  $dbh->do($sql);
-  return;
+  return $dbh->do($sql);
 }
 
 sub _drop_table {
   my ($dbh, $table) = @_;
-  my $q_table = $dbh->quote_identifier($table);
+  my $q_table =
+      $dbh->quote_identifier($table);
   my $sql = "DROP TABLE ${q_table}";
-  $dbh->do($sql);
-  return;
+  return $dbh->do($sql);
 }
 
 sub _drop_view {
   my ($dbh, $view) = @_;
-  my $q_view = $dbh->quote_identifier($view);
+  my $q_view = $dbh->
+      quote_identifier($view);
   my $sql = "DROP VIEW ${q_view}";
-  $dbh->do($sql);
-  return;
+  return $dbh->do($sql);
 }
 
 sub _mysqlnaga_populate_table {
@@ -456,32 +511,45 @@ sub _mysqlnaga_populate_table {
     push(@mysqlnaga_options, q{--port}, $OPTIONS->{port}) if $OPTIONS->{port};
     push(@mysqlnaga_options, q{--user}, $OPTIONS->{user}) if $OPTIONS->{user};
     push(@mysqlnaga_options, q{--pass}, $OPTIONS->{password}) if $OPTIONS->{password};
-    push(@mysqlnaga_options, q{--verbose}) if $OPTIONS->{verbose};
-    push(@mysqlnaga_options, q{--database}, $OPTIONS->{database});
+    push(@mysqlnaga_options, q{--verbose}) if $VERBOSE;
+    push(@mysqlnaga_options, q{--database}, $SOURCE_DB);
     push(@mysqlnaga_options, q{--directory}, cwd());
     push(@mysqlnaga_options, q{--tables}, $table);
     push(@mysqlnaga_options, q{--fields-optionally-enclosed-by}, q{'`'});
+    
+    ## Should this be conditional on the option passed?
     push(@mysqlnaga_options, q{--blocking-select});
     
-    my $mysqlnaga_cmd = join q{ }, 'mysqlnaga', @mysqlnaga_options;
-    system($mysqlnaga_cmd) and die "Could not complete the dump with the command '$mysqlnaga_cmd': $!";
+    my $mysqlnaga_cmd =
+        join(' ', '/home/dbolser/danbolser-mysqlnaga/bin/mysqlnaga',
+             @mysqlnaga_options);
+    
+    verbose("\n$mysqlnaga_cmd\n");
+    system($mysqlnaga_cmd)
+        and die "Could not complete the dump with the command '$mysqlnaga_cmd': $!";
   }
   
   verbose("\tPopulating table data");
   my @mysqlnaga_loader_options;
-  push(@mysqlnaga_loader_options, q{--host}, $OPTIONS->{targethost} || $OPTIONS->{host}) if $OPTIONS->{targethost} || $OPTIONS->{host};
-  push(@mysqlnaga_loader_options, q{--port}, $OPTIONS->{targetport} || $OPTIONS->{port}) if $OPTIONS->{targetport} || $OPTIONS->{port};
-  push(@mysqlnaga_loader_options, q{--user}, $OPTIONS->{targetuser} || $OPTIONS->{user}) if $OPTIONS->{targetuser} || $OPTIONS->{user};
-  push(@mysqlnaga_loader_options, q{--pass}, $OPTIONS->{targetpassword} || $OPTIONS->{password}) if $OPTIONS->{targetpassword} || $OPTIONS->{password};
-  push(@mysqlnaga_loader_options, q{--verbose}) if $OPTIONS->{verbose};
-  push(@mysqlnaga_loader_options, q{--database}, $OPTIONS->{database});
+  push(@mysqlnaga_loader_options, q{--host}, $OPTIONS->{targethost}) if $OPTIONS->{targethost};
+  push(@mysqlnaga_loader_options, q{--port}, $OPTIONS->{targetport}) if $OPTIONS->{targetport};
+  push(@mysqlnaga_loader_options, q{--user}, $OPTIONS->{targetuser}) if $OPTIONS->{targetuser};
+  push(@mysqlnaga_loader_options, q{--pass}, $OPTIONS->{targetpassword}) if $OPTIONS->{targetpassword};
+  push(@mysqlnaga_loader_options, q{--verbose}) if $VERBOSE;
+  push(@mysqlnaga_loader_options, q{--database}, $TARGET_DB);
   push(@mysqlnaga_loader_options, q{--directory}, cwd());
   push(@mysqlnaga_loader_options, q{--tables}, $table);
   push(@mysqlnaga_loader_options, q{--fields-optionally-enclosed-by}, q{'`'});
-  push(@mysqlnaga_loader_options, q{--disable-foreign-keys}) if $OPTIONS->{'disable-foreign-keys'};
+  push(@mysqlnaga_loader_options, q{--disable-foreign-keys})
+      if $DISABLE_FK;
   
-  my $mysqlnaga_loader_cmd = join q{ }, 'mysqlnaga-loader', @mysqlnaga_loader_options;
-  system($mysqlnaga_loader_cmd) and die "Could not complete the load with the command '$mysqlnaga_loader_cmd': $!";
+  my $mysqlnaga_loader_cmd =
+      join(' ', '/home/dbolser/danbolser-mysqlnaga/bin/mysqlnaga-loader',
+           @mysqlnaga_loader_options);
+
+  verbose("\n$mysqlnaga_loader_cmd\n");
+  system($mysqlnaga_loader_cmd)
+      and die "Could not complete the load with the command '$mysqlnaga_loader_cmd': $!";
   
   chdir($cwd);
   
@@ -489,39 +557,45 @@ sub _mysqlnaga_populate_table {
 }
 
 sub _copy_view_ddl {
-  my ($view) = @_;
-  _copy_table_ddl($view, 1);
-  return;
+  my $view = shift;
+  return _copy_table_ddl($view, 1);
 }
 
 sub _copy_table_ddl {
   my ($table, $work_as_view) = @_;
   
   verbose("\tCreating table from source schema");
-  my $q_table = $SOURCE_DBH->quote_identifier($table);
+  my $q_table = $SOURCE_DBH->
+      quote_identifier($table);
   my $sql = "SHOW CREATE TABLE ${q_table}";
-  my @row_ary = $SOURCE_DBH->selectrow_array($sql);
+  my @row_ary = $SOURCE_DBH->
+      selectrow_array($sql);
+  
   my ($table_name, $ddl) = @row_ary;
+  
   if($work_as_view) {
     $ddl = _alter_view($ddl);
   }
+  
   if($NO_DUMP) {
     verbose("\tNo SQL written as --no-dump given at the command line");
   }
   else {
     _write_ddl($table, $ddl);
   }
+  
   $TARGET_DBH->do($ddl);
   
   return;
 }
 
-# Used to change the security to invoker & to remove the definer code
+## Used to change the security to invoker & to remove the definer code
 sub _alter_view {
   my ($ddl) = @_;
   verbose("\tRemoving DEFINER and setting SECURITY for view to INVOKER for portability");
   $ddl =~ s/ DEFINER=[a-zA-Z0-9`@%]+ / /;
   $ddl =~ s/SQL SECURITY DEFINER/SQL SECURITY INVOKER/;
+  
   return $ddl;
 }
 
@@ -544,12 +618,12 @@ sub _mysqldump_populate_table {
 SELECT * from ${q_table} INTO OUTFILE '${filename}'
 FIELDS ESCAPED BY '\\\\'
 SQL
-  
+    
     $SOURCE_DBH->do("LOCK TABLES ${q_table} READ");
     $SOURCE_DBH->do($write_data_out_sql);
     $SOURCE_DBH->do('UNLOCK TABLES');
   }
-
+  
   verbose("\tPopulating table data");
   my $write_data_in_sql = <<SQL;
 LOAD DATA INFILE '${filename}' INTO TABLE ${q_table}
@@ -593,21 +667,27 @@ sub _file {
 sub _write_ddl {
   my ($table, $ddl) = @_;
   my $filename = _file($table, 'sql');
-  open my $fh, '>', $filename or die "Cannot open $filename for write: $!";
+  open my $fh, '>', $filename
+      or die "Cannot open $filename for write: $!";
   print $fh $ddl;
   print $fh "\n";
   close $fh;
+  
   return;
 }
 
+## We only need to do this on the TARGET database (we don't touch the
+## SOURCE database).
 sub _toggle_foreign_key {
-  my ($on) = @_;
-  if($OPTIONS->{'disable-foreign-keys'}) {
+  my $on = shift;
+  
+  if($DISABLE_FK) {
     my $cmd = ($on) ? 1 : 0;
     verbose("\t\tToggling foreign key checks to '$cmd'");
-    my $ddl = qq{set foreign_key_checks=$cmd};
-    $TARGET_DBH->do($ddl);
+    
+    $TARGET_DBH->do( "SET foreign_key_checks = $cmd" );
   }
+  
   return;
 }
 
@@ -805,3 +885,45 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 1.0
 
 =cut
+
+## Subroutines common to all programs. Although this is a package, we
+## simply 'requier' it for ease of installation. CPAN you say?
+
+sub verbose {
+  if ($VERBOSE) {
+    warn @_, "\n";
+  }
+  return;
+}
+
+## Doesn't DBI provide a helper for this?
+sub _open_dbh {
+    my $type = shift || 'source';
+
+    ## If type is 'target', we use an alternative set of options,
+    ## simply distinguished by a consistent prefix
+    my $option_prefix = $type eq 'target' ? 'target' : '';
+    
+    ## Read the options
+    my $host = $OPTIONS->{$option_prefix. 'host'} || '';
+    my $port = $OPTIONS->{$option_prefix. 'port'} || '';
+    my $user = $OPTIONS->{$option_prefix. 'user'} || undef;
+    my $password = $OPTIONS->{$option_prefix. 'password'} || undef;
+    
+    ## We 'DNS-ify' some of the options:
+    $host = "host=$host" if $host;
+    $port = "port=$port" if $port;
+    
+    ## And handle a couple of others...
+    my $block = $OPTIONS->{blocking_select} ? "mysql_use_result=1" : '';
+    my $extra = "mysql_local_infile=1";
+    
+    ## Build the DSN
+    my $dsn = "DBI:mysql:".
+        join(';', $host, $port, $block, $extra);
+    
+    verbose("DSN:$dsn");
+    
+    return
+      DBI->connect( $dsn, $user, $password, { RaiseError => 1 } );
+}
