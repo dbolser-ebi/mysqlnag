@@ -1,7 +1,7 @@
 
-Installing...
+INSTALLING
 
-Starting with a vanilla SL6.2...
+Example, starting with a vanilla SL6.2...
 
 I found I needed to install:
 * DateTime
@@ -23,4 +23,30 @@ $ cpanm DBI
 DBI required gcc, which I installed using yum (sigh).
 
 
+$ cpanm DBD::mysql
+
+DBD::mysql required mysql-devel, which I installed using yum.
+
+
+
 Runs!
+
+
+
+old_db=brassica_rapa_core_13_66_1
+new_db=brassica_rapa_core_13_66_1_test_1
+
+time \
+  ./bin/mysqlnag \
+    --count \
+    --host=mysql-eg-staging-1.ebi.ac.uk --port=4160 \
+    --user=ensro \
+    --database ${old_db} \
+    \
+    --targethost=mysql-eg-devel-2.ebi.ac.uk --targetport=4207 \
+    --targetuser=ensrw --targetpassword=scr1b3d2 \
+    --targetdatabase ${new_db}
+
+
+
+
