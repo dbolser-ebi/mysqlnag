@@ -349,6 +349,8 @@ sub _mysqlnag_populate_table {
     
     my $copy_cmd;
     
+    ## Simply "mysqldump | mysql"...
+    
     $copy_cmd .= "mysqldump \\\n";
     $copy_cmd .= "  --host=$OPTIONS->{host} \\\n" if $OPTIONS->{host};
     $copy_cmd .= "  --port=$OPTIONS->{port} \\\n" if $OPTIONS->{host};
@@ -376,7 +378,7 @@ sub _mysqlnag_populate_table {
             and die "Could not complete the dump! Check the logs : $!";
     }
     else{
-        warn "NOT DUMPING (--no-dump)\n";
+        verbose("\tNOT DUMPING (--no-dump)");
     }
     
     _toggle_foreign_key(1)
