@@ -41,7 +41,6 @@ my $OPTIONS = _parse_options();
 my $SOURCE_DB = $OPTIONS->{database};
 my $TARGET_DB = $OPTIONS->{targetdatabase};
 
-my $VERBOSE   = $OPTIONS->{verbose};
 my $NO_DUMP   = $OPTIONS->{'no-dump'};
 
 my $SOURCE_DBH = _open_dbh('source');
@@ -82,6 +81,11 @@ sub process_db {
   
   ## Compare (and copy) those that differ
   foreach my $table ( sort keys %{$SOURCE_TABLES} ) {
+      ## Filter by --table?
+      if($OPTIONS->{table}){
+          next unless grep { $_ eq $table } @{$OPTIONS->{table}};
+      }
+      
       if ($SOURCE_TABLES->{$table}->{view}) {
           _process_view($table,
                         $SOURCE_TABLES->{$table},
@@ -98,6 +102,11 @@ sub process_db {
   ## Remove those not in the source... Actually we just bitch about them
   ## TODO: Should be made optional?
   foreach my $table( sort keys %{$TARGET_TABLES} ) {
+      ## Filter by --table?
+      if($OPTIONS->{table}){
+          next unless grep { $_ eq $table } @{$OPTIONS->{table}};
+      }
+      
       _remove_table($table,
                     $SOURCE_TABLES->{$table},
                     $TARGET_TABLES->{$table});
@@ -461,7 +470,7 @@ sub _perform_count {
 
 
 sub verbose {
-  if ($VERBOSE) {
+  if ($OPTIONS->{verbose}) {
     warn @_, "\n";
   }
   return;
@@ -479,8 +488,11 @@ sub _parse_options {
     password=s targetpassword=s
     database=s targetdatabase=s
 
+    table=s@
+
     checksum count date
 
+    directory=s
     verbose
     no-dump
 
@@ -525,6 +537,9 @@ sub _process_options {
   
   $opts->{directory} ||= '.';
   $opts->{directory} = File::Spec->rel2abs($opts->{directory});
+  
+  ## The verbose sub doesn't work at this stage!
+  warn "Dumping to $opts->{directory}\n";
   
   $opts->{targetdatabase} ||= $opts->{database};
   
@@ -633,6 +648,12 @@ will be created under that directory.
 =item B<--(target)database>
 
 The (target) database to work with.
+
+
+=item B<--table>
+
+The tables to work with. Use multiple --table options to specify
+multiple tables (sorry).
 
 
 =item B<--(target)host>, B<--(target)port>, B<--(target)user>, B<--(target)password>
