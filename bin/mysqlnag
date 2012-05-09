@@ -24,12 +24,14 @@ mysqlnaga-sync
 
 =head1 SYNOPSIS
 
-  mysqlnaga-sync --database DB [--directory DIR] \
-    [--host HOST] [--port PORT] \
-    [--user USER] [--pass PASS] \
-    [--targethost HOST] [--targetport PORT] \
-    [--targetuser USER] [--targetpass PASS] \
-    [more options in -h]
+  mysqlnag \
+    --database <DB1>
+    [--host <HOST>] [--port <PORT>] \
+    [--user <USER>] [--pass <PASS>] \
+    [--targetdatabase <DB2>]
+    [--targethost <HOST>] [--targetport <PORT>] \
+    [--targetuser <USER>] [--targetpass <PASS>] \
+    [more options in --help]
 
 =cut
 
@@ -482,9 +484,9 @@ sub verbose {
 
 sub _parse_options {
   my @options = qw(
-    host=s targethost=s
-    port=i targetport=i
-    user=s targetuser=s
+    host=s     targethost=s
+    port=i     targetport=i
+    user=s     targetuser=s
     password=s targetpassword=s
     database=s targetdatabase=s
 
@@ -497,7 +499,7 @@ sub _parse_options {
     no-dump
 
     version
-    help|?
+    help|h|?
     man
   );
   
@@ -629,18 +631,18 @@ One of these options is mandatory:
 
 =over 8
 
-=item * Use MySQL checksums to calculate if a table has changed
+=item * Use MySQL checksums to calculate if a table has changed.
 
-=item * Use row counts to calculate if a table has changed
+=item * Use row counts to calculate if a table has changed.
 
-=item * Use the last modified/created date to calculate if a table has changed
+=item * Use the last modified/created date to calculate if a table has changed.
 
 =back
 
 =item B<--directory>
 
 The base directory to dump LOG files. If not specified the program
-will use $CWD. A directory will be created in the base directory with
+will use $PWD. A directory will be created in the base directory with
 same name as the (source) database being transferred. All LOG files
 will be created under that directory.
 
@@ -660,6 +662,11 @@ multiple tables (sorry).
 
 The connection details for the (target) MySQL server for the given
 (target) database.
+
+
+=item B<--no-dump>
+
+Don't do nuffin'
 
 
 =item B<--verbose>
@@ -698,8 +705,8 @@ Dan B
 
 =head1 LICENSE
 
-Copyright (c) 2010, EMBL
-All rights reserved.
+Copyright (c) 2012, EMBL
+All rights unreserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that thefollowing conditions are
@@ -733,6 +740,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 =head1 VERSION
 
-0.1
+0.2
 
 =cut
