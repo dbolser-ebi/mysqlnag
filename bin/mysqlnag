@@ -488,7 +488,7 @@ sub _parse_options {
     port=i     targetport=i
     user=s     targetuser=s
     password=s targetpassword=s
-    database=s targetdatabase=s
+    database=s targetdatabase|target=s
 
     table=s@
 
