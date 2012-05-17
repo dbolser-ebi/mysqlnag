@@ -389,7 +389,7 @@ sub _mysqlnag_populate_table {
             and die "Could not complete the dump! Check the logs : $!";
     }
     else{
-        verbose("\tNOT DUMPING (--no-dump)");
+        verbose("\t\tNOT DUMPING (--no-dump)");
     }
     
     _toggle_foreign_key(1)
