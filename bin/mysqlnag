@@ -16,6 +16,8 @@ use Getopt::Long;
 use Pod::Usage;
 
 
+use Data::Dumper;
+
 =pod
 
 =head1 NAME
@@ -36,18 +38,18 @@ mysqlnaga-sync
 =cut
 
 
-
+## Parse the command line options
 my $OPTIONS = _parse_options();
 
-## These options are used often, so we re-define them here
-my $SOURCE_DB = $OPTIONS->{database};
-my $TARGET_DB = $OPTIONS->{targetdatabase};
-
+## These options are often used, so we assign them to named scalar
+## variables here for no particular reason
+my $SOURCE_DB = $OPTIONS->{'database'};
+my $TARGET_DB = $OPTIONS->{'targetdatabase'};
 my $NO_DUMP   = $OPTIONS->{'no-dump'};
 
+## Connect to the databases
 my $SOURCE_DBH = _open_dbh('source');
 my $TARGET_DBH = _open_dbh('target');
-
 
 
 ## Ready to run...
@@ -79,27 +81,42 @@ sub process_db {
   my $SOURCE_TABLES = _schema_information($SOURCE_DBH, $SOURCE_DB);
   my $TARGET_TABLES = _schema_information($TARGET_DBH, $TARGET_DB);
   
-  ## Loop through tables (and views)
   
-  ## Compare (and copy) those that differ
-  foreach my $table ( sort keys %{$SOURCE_TABLES} ) {
-      ## Filter by --table?
-      if($OPTIONS->{table}){
-          next unless grep { $_ eq $table } @{$OPTIONS->{table}};
-      }
-      
-      if ($SOURCE_TABLES->{$table}->{view}) {
-          _process_view($table,
-                        $SOURCE_TABLES->{$table},
-                        $TARGET_TABLES->{$table});
-      }
-      else{
-          _process_table($table,
-                         $SOURCE_TABLES->{$table},
-                         $TARGET_TABLES->{$table});
-      }
+  
+  ## Loop through SOURCE tables (and then views). Compare (and copy)
+  ## only those that differ to TARGET...
+  
+  # my @tables =
+  #   grep $SOURCE_TABLES->{$_}{type} eq 'BASE TABLE',
+  #     keys %{$SOURCE_TABLES};
+  
+  # my @views =
+  #   grep $SOURCE_TABLES->{$_}{type} eq 'VIEW',
+  #     keys %{$SOURCE_TABLES};
+  
+  # my @tv = (@tables, @views);
+  
+  my @tv = sort {
+      $SOURCE_TABLES->{$a}{type} cmp $SOURCE_TABLES->{$b}{type}
+  } keys %{$SOURCE_TABLES};
+  
+  ## Or just use the list given on the CLI
+  if($OPTIONS->{table}){
+      @tv = @{$OPTIONS->{table}}
   }
   
+  foreach my $tv ( @tv ){
+      if ($SOURCE_TABLES->{$tv}->{type} eq 'BASE TABLE') {
+          _process_table($tv,
+                         $SOURCE_TABLES->{$tv},
+                         $TARGET_TABLES->{$tv});
+      }
+      if ($SOURCE_TABLES->{$tv}->{type} eq 'VIEW') {
+          _process_view($tv,
+                        $SOURCE_TABLES->{$tv},
+                        $TARGET_TABLES->{$tv});
+      }
+  }
   
   ## Remove those not in the source... Actually we just bitch about them
   ## TODO: Should be made optional?
@@ -114,10 +131,10 @@ sub process_db {
                     $TARGET_TABLES->{$table});
   }
   
-  ## Sanity check what we synced by row count
+  ## Sanity check what we have synced by row count
   unless($NO_DUMP){
       foreach my $table( sort keys %{$SOURCE_TABLES} ){
-          next if $SOURCE_TABLES->{$table}->{view};
+          next if $SOURCE_TABLES->{$table}->{type} eq 'VIEW';
           next unless $SOURCE_TABLES->{$table}->{synced};
           _assert_state($table);
       }
@@ -195,27 +212,30 @@ WHERE
 SQL
   
   my $sth = $dbh->
-      prepare($sql);
+    prepare($sql);
   $sth->
-      execute($db);
+    execute($db);
   
   while(my $row = $sth->fetchrow_arrayref()) {
-    my ($table, $created, $modified, $count, $engine, $type) = @{$row};
-    
-    $schema_hash->{$table} = {
-      count => $count,
-      view  => $type eq 'VIEW',
-    };
-    
-    my $date = $modified || $created;
-    $schema_hash->{$table}->{date} =
-      DateTime::Format::MySQL->parse_datetime($date)
-	  if defined $date;
-    
-    if(!$schema_hash->{view} && defined $engine && $engine eq 'InnoDB') {
-      $schema_hash->{$table}->{count} =
-          _perform_count($table, $dbh, $db);
-    }
+      my ($table, $created, $modified, $count, $engine, $type) = @$row;
+      
+      ## Format the date (if we can find one)
+      my $date = DateTime::Format::MySQL->
+        parse_datetime( $modified || $created || '0000-01-01 00:00:00' );
+      
+      $schema_hash->{$table} =
+        { count => $count,
+          type  => $type,
+          date  => $date,
+        };
+      
+      ## Add counts for views where we can
+      if($type eq 'VIEW' &&
+         defined $engine &&
+         $engine eq 'InnoDB') {
+          $schema_hash->{$table}->{count} =
+            _perform_count($table, $dbh, $db);
+      }
   }
   $sth->finish();
   
@@ -261,7 +281,7 @@ sub _process_table {
         
         ## COMPARE BY ROW COUNT
         elsif($OPTIONS->{count}) {
-            ## Zero counts are returned for views
+            ## Zero counts are returned for views?
             if(($source_info->{count} || 0) !=
                ($target_info->{count} || 0)) {
                 $populate_table = 1;
@@ -273,6 +293,11 @@ sub _process_table {
             my $src = _checksum($SOURCE_DBH, $table);
             my $trg = _checksum($TARGET_DBH, $table);
             $populate_table = $src ne $trg;
+        }
+        
+        ## DONT COMPARE, JUST DO IT
+        elsif($OPTIONS->{force}) {
+            $populate_table = 1;
         }
         
         else {
@@ -333,7 +358,7 @@ sub _process_view {
     
     ## Keep track of synced views for sanity checking
     $source_info->{synced} = 1;
-
+    
     verbose("\tFinished view\n");
     return;
 }
@@ -492,7 +517,7 @@ sub _parse_options {
 
     table=s@
 
-    checksum count date
+    checksum count date force
 
     directory=s
     verbose
@@ -532,8 +557,9 @@ sub _process_options {
     pod2usage(EXIT => 64, VERBOSE => 0);
   }
   
-  if ( !$opts->{date} && !$opts->{count} && !$opts->{checksum}) {
-      warn "\nNeed a method to compare tables (--date|--count|--checksum)\n\n";
+  if ( !$opts->{date} && !$opts->{count} && 
+       !$opts->{checksum} && !$opts->{force}) {
+      warn "\nNeed a method to compare tables (--date|--count|--checksum|--force)\n\n";
       pod2usage(EXIT => 64, VERBOSE => 0);
   }
   
