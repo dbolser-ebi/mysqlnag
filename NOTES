@@ -50,3 +50,38 @@ time \
 
 
 
+
+## ALL...
+
+while read -r old_db; do
+    new_db=${old_db/_14_67_/_15_68_}
+    echo $old_db
+    echo $new_db
+    echo
+
+    ./nagwrap.sh \
+        $old_db \
+        $new_db
+
+    echo
+    echo
+
+    #break
+
+done \
+    < <(grep core plant_14_db.list)
+    
+    
+
+
+## TEST
+
+while read -r db; do
+    echo -n "$db "
+    mysql-staging-2 $db -Ne '
+      SELECT COUNT(*)
+      FROM information_schema.TABLES
+      WHERE table_schema = DATABASE()
+      AND TABLE_ROWS > 0'
+done \
+    < plant_16_db.list 
