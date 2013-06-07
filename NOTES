@@ -44,7 +44,7 @@ time \
     --database ${old_db} \
     \
     --targethost=mysql-eg-devel-2.ebi.ac.uk --targetport=4207 \
-    --targetuser=ensrw --targetpassword=scr1b3d2 \
+    --targetuser=ensrw --targetpassword=xxxnxnxn \
     --targetdatabase ${new_db}
 
 
