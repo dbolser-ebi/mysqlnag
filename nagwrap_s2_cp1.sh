@@ -12,32 +12,10 @@ echo " TO  DATABASE: '$DB2'"
 
 
 ## SOURCE database details (ensro, not ensrw)
-
-#S_DB=( $( mysql-eg-mirror          details ) )
- S_DB=( $( mysql-staging-1          details ) )
-#S_DB=( $( mysql-staging-2          details ) )
-#S_DB=( $( mysql-staging-pre        details ) )
-#S_DB=( $( mysql-devel-1            details ) )
-#S_DB=( $( mysql-devel-2            details ) )
-#S_DB=( $( mysql-devel-3            details ) )
-#S_DB=( $( mysql-production-1       details ) )
-#S_DB=( $( mysql-production-2       details ) )
-#S_DB=( $( mysql-production-3       details ) )
-
-
+ S_DB=( $( mysql-staging-2                  details ) )
 
 ## TARGET database details (ensrw, not admin)
-
-#T_DB=( $( mysql-staging-1-ensrw    details ) )
-#T_DB=( $( mysql-staging-2-ensrw    details ) )
- T_DB=( $( mysql-staging-pre-ensrw  details ) )
-#T_DB=( $( mysql-devel-1-ensrw      details ) )
-#T_DB=( $( mysql-devel-2-ensrw      details ) )
-#T_DB=( $( mysql-devel-3-ensrw      details ) )
-#T_DB=( $( mysql-production-1-ensrw details ) )
-#T_DB=( $( mysql-production-2-ensrw details ) )
-#T_DB=( $( mysql-production-3-ensrw details ) )
-#T_DB=( $( mysql-vmtest-ensrw       details ) )
+ T_DB=( $( mysql-cluster-production-1-ensrw details ) )
 
 
 
@@ -136,7 +114,7 @@ done \
 time \
 while read -r new_db; do
     # The list we use is the *next* release...
-    old_db=${new_db/_19_72_/_18_71_}
+    old_db=${new_db/_18_71_/_17_70_}
     
     echo Doing FROM $old_db;
     echo Doing  TO  $new_db;
@@ -149,7 +127,6 @@ while read -r new_db; do
     echo
     
 done \
-    <                      plant_19_db.list &> log.19
     <                      plant_18_db.list &> log.18
 
     < <(grep variation     plant_18_db.list)
