@@ -22,7 +22,7 @@ use Data::Dumper;
 
 =head1 NAME
 
-mysqlnaga-sync
+mysqlnag
 
 =head1 SYNOPSIS
 
@@ -548,7 +548,7 @@ sub _process_options {
   my ($opts) = @_;
   
   if ( $opts->{version} ) {
-    print "mysqlnaga-sync version $VERSION\n";
+    print "mysqlnag version $VERSION\n";
     exit(0);
   }
   
