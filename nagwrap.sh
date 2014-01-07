@@ -13,31 +13,33 @@ echo " TO  DATABASE: '$DB2'"
 
 ## SOURCE database details (ensro, not ensrw)
 
-#S_DB=( $( mysql-eg-mirror          details ) )
- S_DB=( $( mysql-staging-1          details ) )
-#S_DB=( $( mysql-staging-2          details ) )
-#S_DB=( $( mysql-staging-pre        details ) )
-#S_DB=( $( mysql-devel-1            details ) )
-#S_DB=( $( mysql-devel-2            details ) )
-#S_DB=( $( mysql-devel-3            details ) )
-#S_DB=( $( mysql-production-1       details ) )
-#S_DB=( $( mysql-production-2       details ) )
-#S_DB=( $( mysql-production-3       details ) )
+#S_DB=( $( mysql-eg-mirror         details ) )
+ S_DB=( $( mysql-staging-1         details ) )
+#S_DB=( $( mysql-staging-2         details ) )
+#S_DB=( $( mysql-staging-pre       details ) )
+#S_DB=( $( mysql-devel-1           details ) )
+#S_DB=( $( mysql-devel-2           details ) )
+#S_DB=( $( mysql-devel-3           details ) )
+#S_DB=( $( mysql-prod-1            details ) )
+#S_DB=( $( mysql-prod-2            details ) )
+#S_DB=( $( mysql-prod-3            details ) )
 
 
 
 ## TARGET database details (ensrw, not admin)
 
-#T_DB=( $( mysql-staging-1-ensrw    details ) )
-#T_DB=( $( mysql-staging-2-ensrw    details ) )
- T_DB=( $( mysql-staging-pre-ensrw  details ) )
-#T_DB=( $( mysql-devel-1-ensrw      details ) )
-#T_DB=( $( mysql-devel-2-ensrw      details ) )
-#T_DB=( $( mysql-devel-3-ensrw      details ) )
-#T_DB=( $( mysql-production-1-ensrw details ) )
-#T_DB=( $( mysql-production-2-ensrw details ) )
-#T_DB=( $( mysql-production-3-ensrw details ) )
-#T_DB=( $( mysql-vmtest-ensrw       details ) )
+#T_DB=( $( mysql-staging-1-ensrw   details ) )
+#T_DB=( $( mysql-staging-2-ensrw   details ) )
+#T_DB=( $( mysql-staging-pre-ensrw details ) )
+#T_DB=( $( mysql-devel-1-ensrw     details ) )
+#T_DB=( $( mysql-devel-2-ensrw     details ) )
+#T_DB=( $( mysql-devel-3-ensrw     details ) )
+#T_DB=( $( mysql-prod-1-ensrw      details ) )
+#T_DB=( $( mysql-prod-2-ensrw      details ) )
+#T_DB=( $( mysql-prod-3-ensrw      details ) )
+
+#T_DB=( $( mysql-vmtest-ensrw      details ) )
+ T_DB=( $( mysql-enaprod-ensrw     details ) )
 
 
 
@@ -61,7 +63,8 @@ T_HOST=${T_DB[5]}; T_PORT=${T_DB[7]}; T_USER=${T_DB[9]}; T_PASS=${T_DB[11]}
 
 ## Simplify cli
 FROM="    --host=$S_HOST       --port=$S_PORT       --user=$S_USER"
-TO="--targethost=$T_HOST --targetport=$T_PORT --targetuser=$T_USER --targetpassword=$T_PASS"
+TO="--targethost=$T_HOST --targetport=$T_PORT --targetuser=$T_USER \
+                                              --targetpassword=$T_PASS"
 
 ## Other example options
 
@@ -76,7 +79,6 @@ TO="--targethost=$T_HOST --targetport=$T_PORT --targetuser=$T_USER --targetpassw
    # --force \
 
 ## Used to get a (minimal) Slice adaptor
-   # --force \
    # --table assembly \
    # --table coord_system \
    # --table meta \
@@ -87,7 +89,6 @@ TO="--targethost=$T_HOST --targetport=$T_PORT --targetuser=$T_USER --targetpassw
    # --table attrib_type \
 
 ## Used to dump XREFs (transcript and gene?)
-   # --force \
    # --table dependent_xref \
    # --table external_synonym \
    # --table gene \
@@ -98,6 +99,21 @@ TO="--targethost=$T_HOST --targetport=$T_PORT --targetuser=$T_USER --targetpassw
    # --table transcript \
    # --table unmapped_object \
    # --table xref \
+
+## Just dump GO XREFs?
+   # --table ontology_xref \
+   # --table object_xref \
+   # --table xref \
+
+## Used to dump repeat feature pipeline
+   # --table repeat_feature \
+   # --table simple_feature \
+   # --table repeat_consensus \
+   # --table meta_coord \
+   # --table analysis \
+
+## Used to dump InterProScan
+   # --table protein_feature \
 
 time \
   ./bin/mysqlnag \
@@ -112,54 +128,59 @@ exit 0
 
 
 
+## Usefull query?
+
+while read -r from_db; do
+    mysql-staging-1 $from_db \
+        -Ne 'SELECT MAX(UPDATE_TIME), DATABASE()
+             FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = DATABASE()'
+done \
+    < <(grep _core_ plant_19_db.list)
+
 
 
 ## Here is how to run it over a list...
+
+list=plant_21_db.list
 
 time \
 while read -r from_db; do
     echo Doing $from_db;
     
-    time \
-        ./nagwrap.sh $from_db
+    time ./nagwrap.sh $from_db
     
     echo
     echo
-
 done \
-    < <(grep core plant_18_db.list)
+    < <(grep _core_ ${list})
 
 
 
 ## Here is how to run it over a list with release version renaming
 
+# The list we use is the *next* release...
+list=plant_21_db.list
+logs=plant_21_db.log
+
 time \
 while read -r new_db; do
-    # The list we use is the *next* release...
-    old_db=${new_db/_19_72_/_18_71_}
+    #old_db=${new_db/_19_72_/_18_71_}
+    #old_db=${new_db/_20_73_/_19_72_}
+    old_db=${new_db/_21_74_/_20_73_}
     
     echo Doing FROM $old_db;
     echo Doing  TO  $new_db;
     
     time \
-        ./nagwrap.sh $old_db $new_db
+        ./nagwrap.sh $old_db $new_db & 
     
     echo
     echo
     echo
     
 done \
-    <                      plant_19_db.list &> log.19
-    <                      plant_18_db.list &> log.18
-
-    < <(grep variation     plant_18_db.list)
-    < <(grep core          plant_18_db.list)
-    < <(grep otherfeatures plant_18_db.list)
-    < <(grep funcgen       plant_18_db.list)
-
+    < ${list} &> ${logs}
 
 ## Find non-empty logs
 find Logs -type f ! -size 0 
-
-## Mauve logs
-mv Logs Logs18
