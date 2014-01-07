@@ -100,9 +100,16 @@ sub process_db {
       $SOURCE_TABLES->{$a}{type} cmp $SOURCE_TABLES->{$b}{type}
   } keys %{$SOURCE_TABLES};
   
-  ## Or just use the list given on the CLI
-  if($OPTIONS->{table}){
-      @tv = @{$OPTIONS->{table}}
+  ## or just use the list given on the CLI
+  if($OPTIONS->{'table'}){
+      @tv = @{$OPTIONS->{'table'}}
+  }
+  
+  ## and remove the ones we don't want
+  if($OPTIONS->{'skip-table'}){
+      # Initialise a hash using a slice
+      my %skip; @skip{ @{$OPTIONS->{'skip-table'}} } = undef;
+      @tv = grep {not exists $skip{$_}} @tv;
   }
   
   foreach my $tv ( @tv ){
@@ -331,7 +338,7 @@ sub _checksum {
       quote_identifier($table);
   my $sql = "CHECKSUM TABLE ${q_table}";
   my @row_ary = $dbh->selectrow_array($sql);
-  return pop @row_ary;
+  return pop @row_ary || 0;
 }
 
 
@@ -516,6 +523,7 @@ sub _parse_options {
     database=s targetdatabase|target=s
 
     table=s@
+    skip-table=s@
 
     checksum count date force
 
@@ -682,6 +690,12 @@ The (target) database to work with.
 
 The tables to work with. Use multiple --table options to specify
 multiple tables (sorry).
+
+
+=item B<--skip-table>
+
+The tables to skip. Use multiple --skip-table options to specify
+multiple tables to skip (sorry).
 
 
 =item B<--(target)host>, B<--(target)port>, B<--(target)user>, B<--(target)password>
