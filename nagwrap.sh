@@ -29,7 +29,7 @@ echo " TO  DATABASE: '$DB2'"
 ## TARGET database details (ensrw, not admin)
 
 #T_DB=( $( mysql-staging-1-ensrw   details ) )
-#T_DB=( $( mysql-staging-2-ensrw   details ) )
+ T_DB=( $( mysql-staging-2-ensrw   details ) )
 #T_DB=( $( mysql-staging-pre-ensrw details ) )
 #T_DB=( $( mysql-devel-1-ensrw     details ) )
 #T_DB=( $( mysql-devel-2-ensrw     details ) )
@@ -39,7 +39,7 @@ echo " TO  DATABASE: '$DB2'"
 #T_DB=( $( mysql-prod-3-ensrw      details ) )
 
 #T_DB=( $( mysql-vmtest-ensrw      details ) )
- T_DB=( $( mysql-enaprod-ensrw     details ) )
+#T_DB=( $( mysql-enaprod-ensrw     details ) )
 
 
 
@@ -160,20 +160,23 @@ done \
 ## Here is how to run it over a list with release version renaming
 
 # The list we use is the *next* release...
-list=plant_21_db.list
-logs=plant_21_db.log
+list=plant_24_db.list
+logs=plant_24_db.log
 
 time \
 while read -r new_db; do
     #old_db=${new_db/_19_72_/_18_71_}
     #old_db=${new_db/_20_73_/_19_72_}
-    old_db=${new_db/_21_74_/_20_73_}
+    #old_db=${new_db/_21_74_/_20_73_}
+    #old_db=${new_db/_22_75_/_21_74_}
+    #old_db=${new_db/_23_76_/_22_75_}
+     old_db=${new_db/_24_77_/_23_76_}
     
     echo Doing FROM $old_db;
     echo Doing  TO  $new_db;
     
     time \
-        ./nagwrap.sh $old_db $new_db & 
+        ./nagwrap.sh $old_db $new_db
     
     echo
     echo
@@ -184,3 +187,33 @@ done \
 
 ## Find non-empty logs
 find Logs -type f ! -size 0 
+
+
+
+
+
+
+
+
+
+# The list we use is the *previous* release...
+list=plant_22_db.list
+logs=plant_23_db.log
+
+time \
+while read -r old_db; do
+    new_db=${old_db/_22_75_/_23_76_}
+    
+    echo Doing FROM $old_db;
+    echo Doing . TO $new_db;
+    
+    time \
+        ./nagwrap.sh $old_db $new_db &
+    
+    echo
+    echo
+    echo
+    
+done \
+    < ${list} &> ${logs}
+
