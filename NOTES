@@ -53,6 +53,25 @@ time \
 
 ## ALL...
 
+while read -r db; do
+    echo $db
+    echo
+    
+    ./nagwrap2.sh \
+        mysql-staging-1 \
+        mysql-prod-2-ensrw \
+        $db
+    
+    echo
+    echo
+    
+done \
+    < <( grep _core_ ~/Plants/plant_list-31.txt )
+    
+
+
+## ALL with rename ...
+
 while read -r old_db; do
     new_db=${old_db/_14_67_/_15_68_}
     echo $old_db
@@ -85,3 +104,17 @@ while read -r db; do
       AND TABLE_ROWS > 0'
 done \
     < plant_16_db.list 
+
+
+
+
+
+
+perl -ne '
+  $db=$1 if /^FROM DATABASE: (.*)/;
+  $tbl=$1 if /Working on table (.*)/;
+  print "$db\t$tbl\n" if /Table must be synced/
+
+' oot
+
+perl -ne '$db=$1 if /^FROM DATABASE: (.*)/; $tbl=$1 if /Working on table (.*)/; print "$db\t$tbl\n" if /Table must be synced/' nagwrap2-s2-p2.out2 | grep -Pv 'MTMP_probestuff_helper|MTMP_transcript_variation'

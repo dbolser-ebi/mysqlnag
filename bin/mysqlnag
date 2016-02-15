@@ -277,12 +277,19 @@ sub _process_table {
                 $populate_table = 1;
             }
             else {
-                ## Populate only if source is younger than targte
+                ## Populate only if target is younger than source
                 my $cmp = DateTime->
                   compare_ignore_floating($source_info->{date},
                                           $target_info->{date});
                 
                 $populate_table = ($cmp > 0) ? 1 : 0;
+                
+                ## And if checksums differ!
+                if($populate_table == 1){
+                    my $src = _checksum($SOURCE_DBH, $table);
+                    my $trg = _checksum($TARGET_DBH, $table);
+                    $populate_table = $src ne $trg;
+                }
             }
         }
         
@@ -349,8 +356,9 @@ sub _analyse {
   verbose("\tRunning analyse");
   my $q_table =
       $dbh->quote_identifier($table);
-  my $sql = "ANALYZE TABLE $q_table";
-  return $dbh->do($sql);
+  my $sqla = "ANALYZE  TABLE $q_table";
+  my $sqlo = "OPTIMIZE TABLE $q_table";
+  return $dbh->do($sqla) && $dbh->do($sqlo);
 }
 
 
